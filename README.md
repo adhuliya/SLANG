@@ -28,15 +28,15 @@ Currently the system is tested to work on Clang 8.0.1 only.
 
 ### How to use?
 
-We require that clang/llvm to be built from source. `MY_LLVM_DIR` points to the directory housing the `build` as well as the `llvm` source directory.
+We require that clang/llvm to be built from source. We assume `MY_LLVM_DIR` points to the directory housing the `build` as well as the `llvm` source directory.
 
 Now to use "./checkers/SlangCheckers/" do the following,
 
     $ cp -r ./checkers/SlangCheckers $MY_LLVM_DIR/llvm/tools/clang/lib/StaticAnalyzer/Checkers/
 
-or you can also create a symbolic link with the same name in the Clang's source, to point to the `cpp` file in this repo (recommended).
+or you can also create a symbolic link with the same name in the Clang's source, to point to the files in the `./checkers/SlangCheckers/` folder.
 
-Modify `$MY_LLVM_DIR/llvm/tools/clang/lib/StaticAnalyzer/Checkers/CMakeLists.txt` to add the name of the new source file so that `cmake` can pick it up. Add the file name just below  the line that reads `DebugCheckers.cpp`, maintaining the indentation. The file would then read something like this,
+Modify `$MY_LLVM_DIR/llvm/tools/clang/lib/StaticAnalyzer/Checkers/CMakeLists.txt` to add the name of the new source files so that `cmake` can pick it up. Add the file name just below the line that reads `DebugCheckers.cpp`, maintaining the indentation. The file would then read something like this,
 
     $ cd $MY_LLVM_DIR/llvm/tools/clang/lib/StaticAnalyzer/Checkers/
     $ cat CMakeLists.txt
