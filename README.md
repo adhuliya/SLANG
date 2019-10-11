@@ -3,36 +3,36 @@ SLANG
 A bridge between SPAN and Clang.
 
 Authors: <br>
-- Ronak Chauhan (r.chauhan@somaiya.edu) <br>
-- Anshuman Dhuliya (dhuliya@cse.iitb.ac.in)
+- Anshuman Dhuliya (dhuliya@cse.iitb.ac.in) <br>
+- Ronak Chauhan (r.chauhan@somaiya.edu)
 
 Summary
 --------
-The SLANG project interfaces SPAN (Synergistic Program Analyzer) with Clang. Specifically it does the following:
+The SLANG project interfaces SPAN (Synergistic Program Analyzer) with Clang.
+Specifically it does the following:
 
-1. Converts Clang's AST to CFG based SPAN IR.
-2. Processes SPAN resuts to generate Clang checker reports.
+1. Converts Clang's AST to SPAN IR (in Python).
+2. Processes SPAN results (in a text format) to generate Clang checker reports.
 
 Useful Info
 ------------
 * `grep -R TODO` to get list of things todo.
 * `grep -R FIXME` to get list of things to fix.
-* `grep -R Author` to get list of authors.
 
 FAQ's
 ----------
 
 ### What is the supported Clang version?
 
-Currently the system is tested to work on Clang 6.0.1 only. We have plans to shift to Clang 7.0.1.
+Currently the system is tested to work on Clang 8.0.1 only.
 
 ### How to use?
 
 We require that clang/llvm to be built from source. `MY_LLVM_DIR` points to the directory housing the `build` as well as the `llvm` source directory.
 
-Now to use `CFG-plugin/MyDebugChecker.cpp` do the following,
+Now to use "./checkers/SlangCheckers/" do the following,
 
-    $ cp CFG-plugin/MyDebugChecker.cpp $MY_LLVM_DIR/llvm/tools/clang/lib/StaticAnalyzer/Checkers/
+    $ cp -r ./checkers/SlangCheckers $MY_LLVM_DIR/llvm/tools/clang/lib/StaticAnalyzer/Checkers/
 
 or you can also create a symbolic link with the same name in the Clang's source, to point to the `cpp` file in this repo (recommended).
 
@@ -42,28 +42,60 @@ Modify `$MY_LLVM_DIR/llvm/tools/clang/lib/StaticAnalyzer/Checkers/CMakeLists.txt
     $ cat CMakeLists.txt
     ...
       DebugCheckers.cpp
-      MyDebugCheckers.cpp
+      SlangCheckers/SlangBugReporterChecker.cpp
+      SlangCheckers/SlangGenAstChecker.cpp
+      SlangCheckers/SlangUtil.cpp
+      SlangCheckers/MyScratchpadChecker.cpp
+      SlangCheckers/MyOwnChecker.cpp
+      SlangCheckers/MyTraverseAST.cpp
     ...
 
-Modify `$MY_LLVM_DIR/llvm/tools/clang/include/clang/StaticAnalyzer/Checkers/Checkers.td` and add the three line `MyDebugChecker` entry just below the `CFGViewer` entry, as shown below,
+Modify `$MY_LLVM_DIR/llvm/tools/clang/include/clang/StaticAnalyzer/Checkers/Checkers.td`
+and add the text between the "BOUND" lines below the `CFGViewer` entry, as shown below,
 
     $ cd $MY_LLVM_DIR/llvm/tools/clang/include/clang/StaticAnalyzer/Checkers/
     $ cat Checkers.td
     ...
-    def CFGViewer : Checker<"ViewCFG">,
-      HelpText<"View Control-Flow Graphs using GraphViz">,
-      DescFile<"DebugCheckers.cpp">;
-    
-    def MyCFGDumper : Checker<"MyDumpCFG">,
-      HelpText<"Checker to convert Clang AST to SPAN IR and dump it.">,
-      DescFile<"MyDebugCheckers.cpp">;
+      def CFGViewer : Checker<"ViewCFG">,
+        HelpText<"View Control-Flow Graphs using GraphViz">,
+        Documentation<NotDocumented>;
+      
+      //BOUND START : AD
+      
+      def SlangGenAstChecker : Checker<"SlangGenAst">,
+        HelpText<"SlangGen: Checker to convert Clang AST to SPAN IR and dump it.">,
+        Documentation<NotDocumented>;
+      
+      def SlangBugReporterChecker : Checker<"slangbug">,
+        HelpText<"SlangBug: Checker to report bugs given in file.">,
+        Documentation<NotDocumented>;
+      
+      def MyScratchpadChecker : Checker<"myscratch">,
+        HelpText<"MyScratchpad: Checker for testing">,
+        Documentation<NotDocumented>;
+      
+      def MyOwnChecker : Checker<"myownchecker">,
+        HelpText<"My own checker just for hacks.">,
+        Documentation<NotDocumented>;
+      
+      def MyTraverseAST : Checker<"myt">,
+        HelpText<"Print the traversal of the AST (block wise).">,
+        Documentation<NotDocumented>;
+      
+      //BOUND END   : AD
     ...
 
 
 Now go to the `$MY_LLVM_DIR/build` directory and build the system using `make` or `ninja` (which ever you have used to build clang/llvm system).
 
-Once done you can use the checker as any other checker in the system. The invocation name of the checker is `debug.MyDumpCFG`.
+Once done you can use the checker as any other checker in the system.
+The invocation name of each checker is:
 
+1. SlangGenAstChecker: `debug.SlangGenAst`
+1. SlangBugReporterChecker: `debug.slangbug`
+1. MyScratchpadChecker: `debug.myscratch`
+1. MyOwnChecker: `debug.myownchecker`
+1. MyTraverseAST: `debug.myt`
 
 Misc Info
 --------------------------------

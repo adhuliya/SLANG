@@ -5,4 +5,11 @@ a.out
 *.swp
 *.bc
 *.ll
+*.dot
+__pycache__/
+*.so
+*.pyc
+*.pyo
 
+*.spanir
+*.spanir.processed
