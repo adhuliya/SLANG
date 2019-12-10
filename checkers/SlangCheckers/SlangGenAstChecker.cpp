@@ -428,14 +428,19 @@ public:
     dumpFooter(ss);
 
     // TODO: print the content to a file.
-    std::string fileName = this->fileName + ".spanir";
-    Util::writeToFile(fileName, ss.str());
+    if (this->fileName.size()) {
+      std::string fileName = this->fileName + ".spanir";
+      Util::writeToFile(fileName, ss.str());
+    } else {
+      SLANG_INFO("FILE_HAS_NO_FUNCTION: Hence no output spanir file.")
+    }
+
     llvm::errs() << ss.str();
   } // dumpSlangIr()
 
   void dumpHeader(std::stringstream &ss) {
     ss << "\n";
-    ss << "# START: A_SPAN_translation_unit.\n";
+    ss << "# START: A_SPAN_translation_unit!\n";
     ss << "\n";
     ss << "# eval() the contents of this file.\n";
     ss << "# Keep the following imports in effect when calling eval.\n";
@@ -456,7 +461,7 @@ public:
 
   void dumpFooter(std::stringstream &ss) {
     ss << ") # tunit.TranslationUnit() ends\n";
-    ss << "\n# END  : A_SPAN_translation_unit.\n";
+    ss << "\n# END  : A_SPAN_translation_unit!\n";
   } // dumpFooter()
 
   void dumpVariables(std::stringstream &ss) {
@@ -711,6 +716,12 @@ public:
           } else {
             if (varDecl->hasLocalStorage()) {
               SlangExpr slangExpr = convertStmt(varDecl->getInit());
+              if (slangExpr.expr == "Unknown") {
+                SLANG_ERROR("SEARCH_ME")
+                valueDecl->dump();
+                varDecl->dump();
+                varDecl->getInit()->dump();
+              }
               std::string locStr = getLocationString(valueDecl);
               std::stringstream ss;
               ss << "instr.AssignI(";
@@ -1053,7 +1064,7 @@ public:
     slangExpr.compound = true;
     ss.str("");
 
-    if (isTopLevel(callExpr)) {
+    if (hasVoidReturnType(callExpr) || isTopLevel(callExpr)) {
       ss << "instr.CallI(" << slangExpr.expr << ", " << slangExpr.locStr << ")";
       stu.addStmt(ss.str());
       return SlangExpr{}; // return empty expression
@@ -1061,6 +1072,17 @@ public:
 
     return slangExpr;
   }
+
+  bool hasVoidReturnType(const CallExpr *callExpr) const {
+    QualType qt = callExpr->getType();
+      if (qt.isNull()) {
+        return true;
+      }
+
+      qt = getCleanedQualType(qt);
+      const Type *type = qt.getTypePtr();
+      return type->isVoidType();
+  } // hasVoidReturnType()
 
   SlangExpr convertArraySubscriptExpr(const ArraySubscriptExpr *arrayExpr) const {
     SlangExpr slangExpr;
@@ -1071,33 +1093,11 @@ public:
     ++it;
     const Stmt *index = *it;
 
-    SlangExpr parentExpr = convertStmt(object);
+    SlangExpr parentExpr = convertToTmp(convertStmt(object));
     SlangExpr indexExpr = convertToTmp(convertStmt(index));
     SlangExpr tmpExpr;
 
     tmpExpr = parentExpr;
-    if (parentExpr.compound && parentExpr.qualType.getTypePtr()->isArrayType()) {
-      ss << "expr.CastE(" << parentExpr.expr;
-      ss << ", op.CastOp(";
-      ss << convertClangType(FD->getASTContext().getPointerType(arrayExpr->getType()));
-      ss << ")";
-      ss << ", " << getLocationString(arrayExpr) << ")";
-      tmpExpr.expr = ss.str();
-      tmpExpr.qualType = FD->getASTContext().getPointerType(arrayExpr->getType());
-      tmpExpr.compound = true;
-      tmpExpr.locStr = getLocationString(arrayExpr);
-
-      tmpExpr = convertToTmp(tmpExpr);
-
-    } else if (parentExpr.compound) {
-      tmpExpr = convertToTmp(parentExpr);
-    }
-
-    // if (parentExpr.compound &&
-    //     !((object->getStmtClass() == Stmt::ImplicitCastExprClass) &&
-    //     (cast<ImplicitCastExpr>(object)->getCastKind() == CK_ArrayToPointerDecay))) {
-    //   parentExpr = convertToTmp(parentExpr);
-    // }
 
     ss.str("");
     ss << "expr.ArrayE(" << indexExpr.expr;
@@ -1155,6 +1155,7 @@ public:
     memSlangExpr.locStr = getLocationString(memberExpr);
     memSlangExpr.compound = true;
 
+    SLANG_DEBUG("Array_Member_Expr: mem: " << memSlangExpr.expr);
     return memSlangExpr;
   } // convertMemberExpr()
 
@@ -1162,6 +1163,11 @@ public:
     SlangExpr castExpr;
     auto it = cCast->child_begin();
     SlangExpr exprArg = convertToTmp(convertStmt(*it));
+    if (cCast->getType().getTypePtr()->isVoidType()) {
+      // A VOID cast shouldn't be used anywhere.
+      castExpr.expr = "Unkown VOID Cast";
+      return castExpr; // return an empty expression
+    }
     std::string castTypeStr = convertClangType(cCast->getType());
 
     std::stringstream ss;
@@ -1452,7 +1458,11 @@ public:
     SlangExpr retExpr = convertToTmp(convertStmt(retVal));
 
     std::stringstream ss;
-    ss << "instr.ReturnI(" << retExpr.expr << ")";
+    if (retExpr.expr.size() == 0) {
+      retExpr.expr = "None";
+    }
+    ss << "instr.ReturnI(" << retExpr.expr;
+    ss << ", " << getLocationString(returnStmt) << ")";
     stu.addStmt(ss.str());
 
     return SlangExpr{};
@@ -1620,19 +1630,13 @@ public:
       //case CastKind::CK_FunctionToPointerDecay:
       case CastKind::CK_ArrayToPointerDecay: {
         SlangExpr castExpr;
-        SlangExpr exprArg = convertToTmp(convertStmt(*it));
-        std::string castTypeStr = convertClangType(iCast->getType());
-
-        std::stringstream ss;
-        ss << "expr.CastE(" << exprArg.expr;
-        ss << ", op.CastOp(" << castTypeStr << ")";
-        ss << ", " << getLocationString(iCast) << ")";
-
-        castExpr.expr = ss.str();
-        castExpr.compound = true;
-        castExpr.qualType = iCast->getType();
-        castExpr.locStr = getLocationString(iCast);
-        return castExpr;
+        //SlangExpr exprArg = convertToTmp(convertStmt(*it));
+        SlangExpr exprArg = convertStmt(*it);
+        if (exprArg.compound) {
+          return convertToTmp(exprArg);
+        } else {
+          return exprArg;
+        }
       }
 
       default:
@@ -1954,6 +1958,7 @@ public:
     switch (unOp->getOpcode()) {
       default:
         SLANG_DEBUG("convertUnaryOp: " << unOp->getOpcodeStr(unOp->getOpcode()))
+        unOp->dump();
         break;
       case UO_AddrOf: op = "op.UO_ADDROF"; break;
       case UO_Deref: op = "op.UO_DEREF"; break;
@@ -1961,6 +1966,12 @@ public:
       case UO_Plus: op = "op.UO_MINUS"; break;
       case UO_LNot: op = "op.UO_LNOT"; break;
       case UO_Not: op = "op.UO_BIT_NOT"; break;
+      case UO_Extension:
+        exprArg.expr = "expr.LitE(0," + getLocationString(unOp) + ")";
+        exprArg.qualType = unOp->getType();
+        exprArg.locStr = getLocationString(unOp);
+        exprArg.compound = false;
+        return exprArg; // don't handle __extension__ expressions
     }
 
     return createUnaryExpr(op, exprArg, getLocationString(unOp), unOp->getType());
@@ -2079,10 +2090,20 @@ public:
   SlangExpr convertToTmp(SlangExpr slangExpr, bool force = false) const {
     if (slangExpr.compound || force == true) {
       SlangExpr tmpExpr;
-      if (slangExpr.qualType.isNull()) {
+      if (slangExpr.qualType.isNull() || slangExpr.qualType.getTypePtr()->isVoidType()) {
         tmpExpr = genTmpVariable("t", "types.Int32", slangExpr.locStr);
       } else {
-        tmpExpr = genTmpVariable("t", slangExpr.qualType, slangExpr.locStr);
+        if (slangExpr.qualType.getTypePtr()->isArrayType()) {
+          // for array type, generate a tmp variable which is a pointer
+          // to its element types.
+          const Type *type = slangExpr.qualType.getTypePtr();
+          const ArrayType *arrayType = type->getAsArrayTypeUnsafe();
+          QualType elementType = arrayType->getElementType();
+          QualType tmpVarType = FD->getASTContext().getPointerType(elementType);
+          tmpExpr = genTmpVariable("t", tmpVarType, slangExpr.locStr);
+        } else {
+          tmpExpr = genTmpVariable("t", slangExpr.qualType, slangExpr.locStr);
+        }
       }
       std::stringstream ss;
 
@@ -2319,6 +2340,9 @@ public:
       SlangRecord *&returnSlangRecord) const {
     // a hack1 for anonymous decls (it works!) see test 000193.c and its AST!!
     static const RecordDecl *lastAnonymousRecordDecl = nullptr;
+    if (recordDecl->getDefinition()) {
+      recordDecl = recordDecl->getDefinition();
+    }
 
     if (recordDecl == nullptr) {
       // default to the last anonymous record decl
@@ -2435,7 +2459,6 @@ public:
       ss << "UnknownArrayType";
     }
 
-    SLANG_DEBUG(ss.str())
     return ss.str();
   } // convertClangArrayType()
 
@@ -2572,6 +2595,7 @@ public:
     slangExpr.locStr = locStr;
     slangExpr.qualType = qt;
     slangExpr.nonTmpVar = false;
+    slangExpr.compound = false;
 
     return slangExpr;
   } // genTmpVariable()
@@ -2717,6 +2741,8 @@ public:
       if (stmt1) {
         switch (stmt1->getStmtClass()) {
           default:
+            stmt->dump();
+            stmt1->dump();
             return false;
 
           case Stmt::DoStmtClass:
@@ -2738,6 +2764,7 @@ public:
           }
         }
       } else {
+        stmt->dump();
         return false;
       }
     } else {
@@ -2775,3 +2802,4 @@ const FunctionDecl *SlangGenAstChecker::FD = nullptr;
 void ento::registerSlangGenAstChecker(CheckerManager &mgr) {
   mgr.registerChecker<SlangGenAstChecker>();
 }
+
