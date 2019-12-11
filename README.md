@@ -26,7 +26,7 @@ FAQ's
 
 Currently the system is tested to work on Clang 8.0.1 only.
 
-### How to use?
+### How to install and use?
 
 We require that clang/llvm to be built from source. We assume `MY_LLVM_DIR` points to the directory housing the `build` as well as the `llvm` source directory.
 
@@ -96,6 +96,14 @@ The invocation name of each checker is:
 1. MyScratchpadChecker: `debug.myscratch`
 1. MyOwnChecker: `debug.myownchecker`
 1. MyTraverseAST: `debug.myt`
+
+An example usage of `debug.SlangGenAst` is:
+
+    clang --analyze -Xanalyzer -analyzer-checker=debug.SlangGenAst test.c
+
+where `test.c` is a valid C program, and `clang` refers to the program
+built in the process above.
+
 
 Misc Info
 --------------------------------
