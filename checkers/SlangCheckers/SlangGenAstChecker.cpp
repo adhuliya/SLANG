@@ -2,8 +2,8 @@
 //  MIT License.
 //  Copyright (c) 2019 The SLANG Authors.
 //
-//  Author: Ronak Chauhan (r.chauhan@somaiya.edu)
 //  Author: Anshuman Dhuliya [AD] (dhuliya@cse.iitb.ac.in)
+//  Author: Ronak Chauhan (r.chauhan@somaiya.edu)
 //
 //  If SlangGenAstChecker class name is added or changed, then also edit,
 //  ../../../../include/clang/StaticAnalyzer/Checkers/Checkers.td
@@ -2695,6 +2695,10 @@ public:
 
     if (op == "op.UO_ADDROF") {
       ss << "expr.AddrOfE(";
+      ss << expr.expr;
+      ss << ", " << locStr << ")";
+    } else if (op == "op.UO_DEREF") {
+      ss << "expr.DerefE(";
       ss << expr.expr;
       ss << ", " << locStr << ")";
     } else {
