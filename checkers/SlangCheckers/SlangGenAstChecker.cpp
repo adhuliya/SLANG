@@ -52,6 +52,7 @@ typedef std::vector<const Stmt *> StmtVector;
 #define NBSP12 NBSP6 NBSP6
 
 #define VAR_NAME_PREFIX "v:"
+#define GLOBAL_VAR_NAME_PREFIX "g:"
 #define FUNC_NAME_PREFIX "f:"
 
 #define DONT_PRINT "DONT_PRINT"
@@ -124,7 +125,7 @@ public:
   }
 
   void setGlobalVarName(std::string varName) {
-    name = VAR_NAME_PREFIX;
+    name = GLOBAL_VAR_NAME_PREFIX;
     name += varName;
   }
 }; // class SlangVar
