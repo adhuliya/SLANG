@@ -719,9 +719,6 @@ public:
               SlangExpr slangExpr = convertStmt(varDecl->getInit());
               if (slangExpr.expr == "ERROR:Unknown") {
                 SLANG_ERROR("SEARCH_ME")
-                valueDecl->dump();
-                varDecl->dump();
-                varDecl->getInit()->dump();
               }
               std::string locStr = getLocationString(valueDecl);
               std::stringstream ss;
@@ -770,7 +767,6 @@ public:
     if (!stmt) { return slangExpr; }
 
     SLANG_DEBUG("ConvertingStmt : " << stmt->getStmtClassName() << "\n")
-    stmt->dump();
 
     switch (stmt->getStmtClass()) {
     case Stmt::BreakStmtClass:
@@ -1205,7 +1201,6 @@ public:
 
     // Get all case statements inside switch.
     if (switchStmt->getBody()) {
-      switchStmt->getBody()->dump(); // delit
       getCaseStmts(caseStmtsWithDefault, switchStmt->getBody());
       // getDefaultStmt(defaultStmt, switchStmt->getBody());
 
@@ -1759,8 +1754,6 @@ public:
 
     std::string locStr = getLocationString(sl);
 
-    llvm::errs() << "STRING_LITERAL:"; //delit
-    sl->dump(); //delit
     // with extra text at the end since """" could occur
     // making the string invalid in python
     ss << "expr.LitE(\"\"\"" << sl->getBytes().str() << "XXX\"\"\"";
@@ -1969,7 +1962,6 @@ public:
     switch (unOp->getOpcode()) {
       default:
         SLANG_DEBUG("convertUnaryOp: " << unOp->getOpcodeStr(unOp->getOpcode()))
-        unOp->dump();
         break;
       case UO_AddrOf: op = "op.UO_ADDROF"; break;
       case UO_Deref: op = "op.UO_DEREF"; break;
@@ -2396,7 +2388,6 @@ public:
 
     SlangRecord *getBackSlangRecord;
     for (auto it = recordDecl->decls_begin(); it != recordDecl->decls_end(); ++it) {
-      (*it)->dump();
       if (isa<RecordDecl>(*it)) {
         convertClangRecordType(cast<RecordDecl>(*it), getBackSlangRecord);
       } else if (isa<FieldDecl>(*it)) {
@@ -2758,8 +2749,6 @@ public:
       if (stmt1) {
         switch (stmt1->getStmtClass()) {
           default:
-            stmt->dump();
-            stmt1->dump();
             return false;
 
           case Stmt::CaseStmtClass:
@@ -2789,7 +2778,6 @@ public:
           }
         }
       } else {
-        stmt->dump();
         return false;
       }
     } else {
