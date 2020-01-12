@@ -694,7 +694,7 @@ public:
             SlangExpr castExpr;
             ss.str("");
             ss << "expr.CastE(" << tmpVoidPtr.expr;
-            ss << ", op.CastOp(" << convertClangType(valueDecl->getType()) << ")";
+            ss << ", " << convertClangType(valueDecl->getType());
             ss << ", " << getLocationString(valueDecl) << ")";
             castExpr.expr = ss.str();
             castExpr.qualType = valueDecl->getType();
@@ -1124,7 +1124,8 @@ public:
     // store parent to a temporary
     parentTmpExpr = parentExpr;
     if (parentExpr.compound) {
-      if (parentExpr.qualType.getTypePtr()->isPointerType()) {
+      if (parentExpr.qualType.getTypePtr()->isPointerType()
+          || !(parentExpr.expr.substr(0,12) == "expr.MemberE")) {
         parentTmpExpr = convertToTmp(parentExpr);
       } else {
         SlangExpr addrOfExpr;
@@ -1161,27 +1162,10 @@ public:
   } // convertMemberExpr()
 
   SlangExpr convertCStyleCastExpr(const CStyleCastExpr *cCast) const {
-    SlangExpr castExpr;
     auto it = cCast->child_begin();
-    SlangExpr exprArg = convertToTmp(convertStmt(*it));
-    if (cCast->getType().getTypePtr()->isVoidType()) {
-      // A VOID cast shouldn't be used anywhere.
-      castExpr.expr = "Unkown VOID Cast";
-      return castExpr; // return an empty expression
-    }
-    std::string castTypeStr = convertClangType(cCast->getType());
+    QualType qt = cCast->getType();
 
-    std::stringstream ss;
-    ss << "expr.CastE(" << exprArg.expr;
-    ss << ", op.CastOp(" << castTypeStr << ")";
-    ss << ", " << getLocationString(cCast) << ")";
-
-    castExpr.expr = ss.str();
-    castExpr.compound = true;
-    castExpr.qualType = cCast->getType();
-    castExpr.locStr = getLocationString(cCast);
-
-    return castExpr;
+    return convertCastExpr(*it, qt, getLocationString(cCast));
   } // convertCStyleCastExpr()
 
   SlangExpr convertGotoStmt(const GotoStmt *gotoStmt) const {
@@ -1620,28 +1604,47 @@ public:
     return SlangExpr{}; // return empty expression
   } // convertForStmt()
 
+  SlangExpr convertCastExpr(const Stmt *expr, QualType qt, std::string locStr) const {
+    // Generates CastE() expression.
+    SlangExpr castExpr;
+    SlangExpr exprArg = convertToTmp(convertStmt(expr));
+    auto typePtr = qt.getTypePtr();
+    if (typePtr->isVoidType()) {
+      // A VOID cast shouldn't be used anywhere.
+      castExpr.expr = "ERROR:Unkown VOID Cast";
+      return castExpr; // return an empty expression
+    }
+    std::string castTypeStr = convertClangType(qt);
+
+    std::stringstream ss;
+    ss << "expr.CastE(" << exprArg.expr;
+    ss << ", " << castTypeStr;
+    ss << ", " << locStr << ")";
+
+    castExpr.expr = ss.str();
+    castExpr.compound = true;
+    castExpr.qualType = qt;
+    castExpr.locStr = locStr;
+
+    return castExpr;
+  } // convertCastExpr()
+
   SlangExpr convertImplicitCastExpr(const ImplicitCastExpr *iCast) const {
     // only one child is expected
     auto it = iCast->child_begin();
     auto ck = iCast->getCastKind();
 
     switch(ck) {
-      case CastKind::CK_FloatingToIntegral:
       case CastKind::CK_IntegralToFloating:
-      //case CastKind::CK_FunctionToPointerDecay:
+      case CastKind::CK_FloatingToIntegral:
+      case CastKind::CK_IntegralCast:
       case CastKind::CK_ArrayToPointerDecay: {
-        SlangExpr castExpr;
-        //SlangExpr exprArg = convertToTmp(convertStmt(*it));
-        SlangExpr exprArg = convertStmt(*it);
-        if (exprArg.compound) {
-          return convertToTmp(exprArg);
-        } else {
-          return exprArg;
-        }
+        return convertStmt(*it);
       }
 
       default:
         return convertStmt(*it);
+        //return convertCastExpr(*it, iCast->getType(), getLocationString(iCast));
     }
   }
 
@@ -1769,7 +1772,7 @@ public:
   } // convertStringLiteral()
 
   SlangExpr convertVariable(const VarDecl *varDecl,
-      std::string locStr = "Loc(3,3)") const {
+      std::string locStr = "Info(Loc(33333,33333))") const {
     std::stringstream ss;
     SlangExpr slangExpr;
 
@@ -2615,11 +2618,11 @@ public:
     uint32_t line = 0;
     uint32_t col = 0;
 
-    ss << "Loc(";
+    ss << "Info(Loc(";
     line = FD->getASTContext().getSourceManager().getExpansionLineNumber(stmt->getBeginLoc());
     ss << line << ",";
     col = FD->getASTContext().getSourceManager().getExpansionColumnNumber(stmt->getBeginLoc());
-    ss << col << ")";
+    ss << col << "))";
 
     return ss.str();
   }
@@ -2629,12 +2632,12 @@ public:
     uint32_t line = 0;
     uint32_t col = 0;
 
-    ss << "Loc(";
+    ss << "Info(Loc(";
     line = FD->getASTContext().getSourceManager().getExpansionLineNumber(recordDecl->getBeginLoc());
     ss << line << ",";
     col =
         FD->getASTContext().getSourceManager().getExpansionColumnNumber(recordDecl->getBeginLoc());
-    ss << col << ")";
+    ss << col << "))";
 
     return ss.str();
   }
@@ -2644,11 +2647,11 @@ public:
     uint32_t line = 0;
     uint32_t col = 0;
 
-    ss << "Loc(";
+    ss << "Info(Loc(";
     line = FD->getASTContext().getSourceManager().getExpansionLineNumber(valueDecl->getBeginLoc());
     ss << line << ",";
     col = FD->getASTContext().getSourceManager().getExpansionColumnNumber(valueDecl->getBeginLoc());
-    ss << col << ")";
+    ss << col << "))";
 
     return ss.str();
   }
@@ -2825,3 +2828,6 @@ void ento::registerSlangGenAstChecker(CheckerManager &mgr) {
   mgr.registerChecker<SlangGenAstChecker>();
 }
 
+bool ento::shouldRegisterSlangGenAstChecker(const LangOptions &LO) {
+  return true;
+}
