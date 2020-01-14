@@ -2816,6 +2816,6 @@ void ento::registerSlangGenAstChecker(CheckerManager &mgr) {
   mgr.registerChecker<SlangGenAstChecker>();
 }
 
-bool ento::shouldRegisterSlangGenAstChecker(const LangOptions &LO) {
-  return true;
-}
+// bool ento::shouldRegisterSlangGenAstChecker(const LangOptions &LO) {
+//   return true;
+// }
