@@ -406,3 +406,8 @@ void SlangBugReporterChecker::generateSingleBugReport(Bug &bug) const {
 void ento::registerSlangBugReporterChecker(CheckerManager &mgr) {
     mgr.registerChecker<SlangBugReporterChecker>();
 }
+
+// bool ento::shouldRegisterSlangBugReporterChecker(const LangOptions &LO) {
+//   return true;
+// }
+

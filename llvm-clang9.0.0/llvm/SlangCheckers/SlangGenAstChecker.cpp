@@ -2819,3 +2819,4 @@ void ento::registerSlangGenAstChecker(CheckerManager &mgr) {
 bool ento::shouldRegisterSlangGenAstChecker(const LangOptions &LO) {
   return true;
 }
+

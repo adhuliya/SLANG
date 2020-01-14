@@ -28,6 +28,8 @@ Currently the system is tested to work on Clang 8.0.1 only.
 
 ### How to install and use?
 
+Note: Don't miss the 'IMPORTANT' step at the end too.
+
 We require that clang/llvm to be built from source. We assume `MY_LLVM_DIR` points to the directory housing the `build` as well as the `llvm` source directory.
 
 Now to use "./checkers/SlangCheckers/" do the following,
@@ -85,6 +87,10 @@ and add the text between the "BOUND" lines below the `CFGViewer` entry, as shown
       //BOUND END   : AD
     ...
 
+Note: IMPORTANT Step: These checkers work only on LLVM 9.0.0 or above. To make it
+work on LLVM 8.0.0 or LLVM 8.0.1, in each `cpp` file in the `checker/SlangCheckers` folder
+remove the function that starts with `ento::shouldRegister` prefix.
+(I try to remove these functions myself when updating the repo, but just in case.)
 
 Now go to the `$MY_LLVM_DIR/build` directory and build the system using `make` or `ninja` (which ever you have used to build clang/llvm system).
 
