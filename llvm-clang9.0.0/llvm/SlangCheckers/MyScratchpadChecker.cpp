@@ -55,3 +55,8 @@ void ento::registerMyScratchpadChecker(CheckerManager &mgr) {
     // llvm::errs() << "A scratchpad to learn.\n";
     mgr.registerChecker<MyScratchpadChecker>();
 }
+
+bool ento::shouldRegisterMyScratchpadChecker(const LangOptions &LO) {
+  return true;
+}
+
