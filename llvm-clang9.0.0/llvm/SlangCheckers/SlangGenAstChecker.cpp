@@ -886,7 +886,8 @@ public:
           convertStmt(varArrayType->getSizeExpr()));
 
       SlangExpr sizeOfThisVarArrExpr = convertToTmp(createBinaryExpr(thisVarArrSizeExpr,
-          "op.BO_MUL", tmpSubArraySize, thisVarArrSizeExpr.locStr));
+          "op.BO_MUL", tmpSubArraySize, thisVarArrSizeExpr.locStr,
+          varArrayType->getSizeExpr()->getType()));
 
       SlangExpr tmpThisArraySize = convertToTmp(sizeOfThisVarArrExpr);
       return tmpThisArraySize;
@@ -909,7 +910,8 @@ public:
 
       SlangExpr sizeOfThisVarArrExpr = convertToTmp(
           createBinaryExpr(thisVarArrSizeExpr,
-              "op.BO_MUL", sizeOfInnerNonVarArrType, thisVarArrSizeExpr.locStr));
+              "op.BO_MUL", sizeOfInnerNonVarArrType, thisVarArrSizeExpr.locStr,
+              sizeOfInnerNonVarArrType.qualType));
 
       SlangExpr tmpThisArraySize = convertToTmp(sizeOfThisVarArrExpr);
       return tmpThisArraySize;
@@ -1256,7 +1258,8 @@ public:
         addLabelInstr(condLabel); // condition label
         // add the actual condition
         SlangExpr eqExpr = convertToIfTmp(createBinaryExpr(switchCond,
-            "op.BO_EQ", caseCond, getLocationString(caseStmt)));
+            "op.BO_EQ", caseCond, getLocationString(caseStmt),
+            FD->getASTContext().UnsignedIntTy));
         addCondInstr(eqExpr.expr, bodyLabel, falseLabel, getLocationString(caseStmt));
 
         // case body
@@ -1915,7 +1918,7 @@ public:
     litOne.locStr = getLocationString(unOp);
 
     SlangExpr incDecExpr = createBinaryExpr(exprArg, op,
-        litOne, getLocationString(unOp));
+        litOne, getLocationString(unOp), exprArg.qualType);
 
     switch(unOp->getOpcode()) {
       case UO_PreInc:
@@ -1977,7 +1980,8 @@ public:
         return exprArg; // don't handle __extension__ expressions
     }
 
-    return createUnaryExpr(op, exprArg, getLocationString(unOp), unOp->getType());
+    return createUnaryExpr(op, exprArg, getLocationString(unOp),
+        getImplicitType(unOp, unOp->getType()));
   } // convertUnaryOperator()
 
   SlangExpr convertUnaryExprOrTypeTraitExpr(const UnaryExprOrTypeTraitExpr *stmt) const {
@@ -2084,7 +2088,8 @@ public:
     SlangExpr rightOprExpr = convertStmt(rightOprStmt);
 
     slangExpr = createBinaryExpr(leftOprExpr,
-        op, rightOprExpr, getLocationString(binOp));
+        op, rightOprExpr, getLocationString(binOp),
+        getImplicitType(binOp, binOp->getType()));
 
     return slangExpr;
   } // convertBinaryOperator()
@@ -2178,10 +2183,12 @@ public:
     SlangExpr newRhsExpr;
     if (lhsExpr.compound) {
       newRhsExpr = convertToTmp(createBinaryExpr(
-          lhsExpr, op, rhsExpr, getLocationString(binOp)));
+          lhsExpr, op, rhsExpr, getLocationString(binOp),
+          lhsExpr.qualType));
     } else {
       newRhsExpr = createBinaryExpr(
-          lhsExpr, op, rhsExpr, getLocationString(binOp));
+          lhsExpr, op, rhsExpr, getLocationString(binOp),
+          lhsExpr.qualType);
     }
 
     addAssignInstr(lhsExpr, newRhsExpr, getLocationString(binOp));
@@ -2720,7 +2727,8 @@ public:
   } // createUnaryExpr()
 
   SlangExpr createBinaryExpr(SlangExpr lhsExpr,
-      std::string op, SlangExpr rhsExpr, std::string locStr) const {
+      std::string op, SlangExpr rhsExpr, std::string locStr,
+      QualType qt) const {
     SlangExpr binaryExpr;
 
     lhsExpr = convertToTmp(lhsExpr);
@@ -2733,12 +2741,33 @@ public:
     ss << ", " << locStr << ")";
 
     binaryExpr.expr = ss.str();
-    binaryExpr.qualType = lhsExpr.qualType;
+    binaryExpr.qualType = qt;
     binaryExpr.compound = true;
     binaryExpr.locStr = locStr;
 
     return binaryExpr;
   } // createBinaryExpr()
+
+  // If the expression is the child of an implicit cast,
+  // the type of implicit cast is returned, else the given qt is returned
+  QualType getImplicitType(const Stmt *stmt, QualType qt) const {
+    const auto &parents = FD->getASTContext().getParents(*stmt);
+    if (!parents.empty()) {
+      const Stmt *stmt1 = parents[0].get<Stmt>();
+      if (stmt1) {
+        switch (stmt1->getStmtClass()) {
+          default:
+            return qt; // just return the given type
+
+          case Stmt::ImplicitCastExprClass: {
+            const ImplicitCastExpr *iCast = cast<ImplicitCastExpr>(stmt1);
+            return iCast->getType();
+          } // case
+        } // switch
+      } // if
+    } // if
+    return qt; // just return the given type
+  } // getImplicitType()
 
   // If an element is top level, return true.
   // e.g. in statement "x = y = z = 10;" the first "=" from left is top level.
