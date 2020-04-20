@@ -1,6 +1,6 @@
 //===----------------------------------------------------------------------===//
 //  MIT License.
-//  Copyright (c) 2019 The SLANG Authors.
+//  Copyright (c) 2020 The SLANG Authors.
 //
 //  Author: Anshuman Dhuliya [AD] (dhuliya@cse.iitb.ac.in)
 //  Author: Ronak Chauhan (r.chauhan@somaiya.edu)
@@ -9,7 +9,7 @@
 //  ../../../../include/clang/StaticAnalyzer/Checkers/Checkers.td
 //  if this checker is named `SlangGenAst` (in Checkers.td) then it can be used as follows,
 //
-//      clang --analyze -Xanalyzer -analyzer-checker=debug.slanggen test.c |& tee mylog
+//      clang --analyze -Xanalyzer -analyzer-checker=debug.SlangGenAst test.c |& tee mylog
 //
 //  which generates the file `test.c.spanir`.
 //===----------------------------------------------------------------------===//
@@ -40,7 +40,8 @@ using namespace slang;
 using namespace clang;
 using namespace ento;
 
-typedef std::vector<const Stmt *> StmtVector;
+typedef std::vector<const Stmt *>   StmtVector;
+typedef std::vector<std::string>    SpanStmtVector;
 
 // non-breaking space
 #define NBSP1 " "
@@ -61,6 +62,8 @@ typedef std::vector<const Stmt *> StmtVector;
 #define LABEL_PREFIX "instr.LabelI(\""
 #define LABEL_SUFFIX "\")"
 
+#define GLOBAL_DUMMY_FUNC_NAME "global_dummy_function"
+
 // Generate the SPAN IR from Clang AST.
 namespace {
 // the numbering 0,1,2 is important.
@@ -69,20 +72,20 @@ enum SlangRecordKind { Struct = 0, Union = 1 };
 
 class SlangExpr {
 public:
-  std::string expr;
-  bool compound;
-  std::string locStr;
-  QualType qualType;
-  bool nonTmpVar;
-  uint64_t varId;
+  std::string     expr;
+  bool            compound;
+  std::string     locStr;
+  QualType        qualType;
+  bool            nonTmpVar;
+  uint64_t        varId;
 
   SlangExpr() {
-    expr = "";
-    compound = false;
-    locStr = "";
-    qualType = QualType();
-    nonTmpVar = true;
-    varId = 0;
+    expr        = "";
+    compound    = false;
+    locStr      = "";
+    qualType    = QualType();
+    nonTmpVar   = true;
+    varId       = 0;
   };
 
   std::string toString() {
@@ -142,7 +145,7 @@ public:
   uint32_t tmpVarCount;
   const Stmt *lastDeclStmt;
 
-  std::vector<std::string> spanStmts;
+  SpanStmtVector spanStmts;
 
   SlangFunc() {
     variadic = false;
@@ -184,18 +187,18 @@ public:
 // holds a struct or a union record
 class SlangRecord {
 public:
-  SlangRecordKind recordKind; // Struct, or Union
-  bool anonymous;
-  std::string name;
+  SlangRecordKind               recordKind; // Struct, or Union
+  bool                          anonymous;
+  std::string                   name;
   std::vector<SlangRecordField> members;
-  std::string locStr;
-  int32_t nextAnonymousFieldId;
+  std::string                   locStr;
+  int32_t                       nextAnonymousFieldId;
 
   SlangRecord() {
-    recordKind = Struct; // Struct, or Union
-    anonymous = false;
-    name = "";
-    nextAnonymousFieldId = 0;
+    recordKind            = Struct; // Struct, or Union
+    anonymous             = false;
+    name                  = "";
+    nextAnonymousFieldId  = 0;
   }
 
   std::string getNextAnonymousFieldIdStr() {
@@ -205,7 +208,9 @@ public:
     return ss.str();
   }
 
-  std::vector<SlangRecordField> getFields() const { return members; }
+  std::vector<SlangRecordField> getFields() const {
+    return members;
+  }
 
   std::string genMemberExpr(std::vector<uint32_t> indexVector) {
     std::stringstream ss;
@@ -274,55 +279,62 @@ public:
 // holds details of the entire translation unit
 class SlangTranslationUnit {
 public:
-  uint64_t uniqueId;
-  std::string fileName; // the current translation unit file name
-  SlangFunc *currFunc;  // the current function being translated
+    uint64_t uniqueId;
+    std::string fileName; // the current translation unit file name
 
-  uint32_t labelCount;
+    SpanStmtVector globalInits; // global variable initializations
+    bool globalInitsConverted;  // True if global inits have been converted to span statements
 
-  // to uniquely name anonymous records (see getNextRecordId())
-  int32_t recordId;
+    SlangFunc *currFunc;  // the current function being translated
 
-  // maps a unique variable id to its SlangVar.
-  std::unordered_map<uint64_t, SlangVar> varMap;
-  // map of var-name to a count:
-  // used in case two local variables have same name (blocks)
-  std::unordered_map<std::string, uint64_t> varCountMap;
-  // contains functions
-  std::unordered_map<uint64_t, SlangFunc> funcMap;
-  // contains structs
-  std::unordered_map<uint64_t, SlangRecord> recordMap;
+    uint32_t labelCount;
 
-  // tracks variables that become dirty in an expression
-  std::unordered_map<uint64_t, SlangExpr> dirtyVars;
+    // to uniquely name anonymous records (see getNextRecordId())
+    int32_t recordId;
 
-  // vector of start and exit label of constructs which can contain break and continue stmts.
-  std::vector<std::pair<std::string, std::string>> entryExitLabels;
+    // maps a unique variable id to its SlangVar.
+    std::unordered_map<uint64_t, SlangVar> varMap;
+    // map of var-name to a count:
+    // used in case two local variables have same name (blocks)
+    std::unordered_map<std::string, uint64_t> varCountMap;
+    // contains functions
+    std::unordered_map<uint64_t, SlangFunc> funcMap;
+    // contains structs
+    std::unordered_map<uint64_t, SlangRecord> recordMap;
 
-  void pushLabels(std::string entry, std::string exit) {
-    auto labelPair = std::make_pair(entry, exit);
-    entryExitLabels.push_back(labelPair);
-  }
+    // tracks variables that become dirty in an expression
+    std::unordered_map<uint64_t, SlangExpr> dirtyVars;
 
-  void popLabel() {
-    entryExitLabels.pop_back();
-  }
+    // vector of start and exit label of constructs which can contain break and continue stmts.
+    std::vector<std::pair<std::string, std::string>> entryExitLabels;
 
-  std::pair<std::string, std::string>& peekLabel() {
-    return entryExitLabels[entryExitLabels.size()-1];
-  }
+    void pushLabels(std::string entry, std::string exit) {
+      auto labelPair = std::make_pair(entry, exit);
+      entryExitLabels.push_back(labelPair);
+    }
 
-  std::string peekEntryLabel() {
-    return entryExitLabels[entryExitLabels.size()-1].first;
-  }
+    void popLabel() {
+      entryExitLabels.pop_back();
+    }
 
-  std::string peekExitLabel() {
-    return entryExitLabels[entryExitLabels.size()-1].second;
-  }
+    std::pair<std::string, std::string> &peekLabel() {
+      return entryExitLabels[entryExitLabels.size() - 1];
+    }
 
-  SlangTranslationUnit()
-      : uniqueId{0}, fileName{}, currFunc{nullptr}, recordId{0}, varMap{}, varCountMap{}, funcMap{}, dirtyVars{} {
-  }
+    std::string peekEntryLabel() {
+      return entryExitLabels[entryExitLabels.size() - 1].first;
+    }
+
+    std::string peekExitLabel() {
+      return entryExitLabels[entryExitLabels.size() - 1].second;
+    }
+
+    SlangTranslationUnit()
+        : uniqueId{0}, fileName{},
+          globalInits{}, globalInitsConverted{false},
+          currFunc{nullptr}, recordId{0},
+          varMap{}, varCountMap{}, funcMap{}, dirtyVars{}
+    {}
 
   // clear the buffer for the next function.
   void clear() {
@@ -342,16 +354,22 @@ public:
     return ss.str();
   }
 
-  void addStmt(std::string spanStmt) { currFunc->spanStmts.push_back(spanStmt); }
+  void addStmt(std::string spanStmt) {
+    currFunc->spanStmts.push_back(spanStmt);
+  }
 
   void pushBackFuncParams(std::string paramName) {
     SLANG_TRACE("AddingParam: " << paramName << " to func " << currFunc->name)
     currFunc->paramNames.push_back(paramName);
   }
 
-  void setFuncReturnType(std::string &retType) { currFunc->retType = retType; }
+  void setFuncReturnType(std::string &retType) {
+    currFunc->retType = retType;
+  }
 
-  void setVariadicness(bool variadic) { currFunc->variadic = variadic; }
+  void setVariadicness(bool variadic) {
+    currFunc->variadic = variadic;
+  }
 
   std::string getCurrFuncName() {
     return currFunc->name; // not fullName
@@ -425,6 +443,7 @@ public:
 
     dumpHeader(ss);
     dumpVariables(ss);
+    dumpGlobalInits(ss);
     dumpObjs(ss);
     dumpFooter(ss);
 
@@ -477,6 +496,16 @@ public:
     ss << NBSP2 << "}, # end allVars dict\n\n";
   } // dumpVariables()
 
+  void dumpGlobalInits(std::stringstream &ss) {
+    SlangFunc slangFunc = funcMap[0];
+    // ss << "\n";
+    ss << NBSP2 << "globalInits = [\n";
+    for (auto insn : slangFunc.spanStmts) {
+      ss << NBSP4 << insn << ",\n";
+    }
+    ss << NBSP2 << "], # end globalInits.\n\n";
+  }
+
   void dumpObjs(std::stringstream &ss) {
     ss << NBSP2 << "allConstructs = {\n";
     dumpRecords(ss);
@@ -497,6 +526,10 @@ public:
   void dumpFunctions(std::stringstream &ss) {
     std::string prefix;
     for (auto slangFunc : funcMap) {
+      if (slangFunc.second.fullName == GLOBAL_DUMMY_FUNC_NAME) {
+        continue;
+      }
+
       ss << NBSP4; // indent
       ss << "\"" << slangFunc.second.fullName << "\":\n";
       ss << NBSP6 << "constructs.Func(\n";
@@ -536,6 +569,8 @@ public:
 
 }; // class SlangTranslationUnit
 
+
+
 class SlangGenAstChecker : public Checker<check::ASTCodeBody, check::EndOfTranslationUnit> {
 
   // static_members initialized
@@ -556,6 +591,13 @@ public:
     }
 
     FD = dyn_cast<FunctionDecl>(D);
+
+    if (!stu.globalInitsConverted) {
+      // this condition is only entered once
+      handleGlobalInitializations(FD);
+      stu.globalInitsConverted = true;  // this is why
+    }
+
     if (FD) {
       FD = FD->getCanonicalDecl();
       FD = handleFuncNameAndType(FD, true);
@@ -578,6 +620,27 @@ public:
   // BOUND END  : top_level_routines
 
   // BOUND START: handling_routines
+
+  // This function
+  void handleGlobalInitializations(const FunctionDecl *funcDecl) const {
+    // All global initializations are stored in a global dummy function
+    // as a sequence of statements.
+    // This function should be visited only once.
+
+    const TranslationUnitDecl *decl = funcDecl->getTranslationUnitDecl();
+
+    SlangFunc slangFunc;
+    slangFunc.fullName  = slangFunc.name = GLOBAL_DUMMY_FUNC_NAME;
+    stu.funcMap[0]      = slangFunc;
+    stu.currFunc        = &stu.funcMap[0];   // the special global function
+
+    for (auto it = decl->decls_begin(); it != decl->decls_end(); ++it) {
+      const VarDecl *varDecl = dyn_cast<VarDecl>(*it);
+      if (varDecl) {
+        handleVarDecl(varDecl);
+      }
+    }
+  } // handleGlobalInitializations()
 
   void handleFunctionBody(const FunctionDecl *funcDecl) const {
     const Stmt *body = funcDecl->getBody();
@@ -632,106 +695,114 @@ public:
 
   } // handleFuncDecl()
 
+
+  void handleVarDecl(const VarDecl *varDecl, std::string funcName = "") const {
+    uint64_t varAddr = (uint64_t)varDecl;
+    std::string varName;
+
+    if (stu.isNewVar(varAddr)) {
+      // seeing the variable for the first time.
+      SlangVar slangVar{};
+      slangVar.id = varAddr;
+
+      varName = varDecl->getNameAsString();
+
+      slangVar.typeStr = convertClangType(varDecl->getType());
+      SLANG_DEBUG("NEW_VAR: " << slangVar.convertToString())
+
+      if (varName == "") {
+        // used only to name anonymous function parameters
+        varName = Util::getNextUniqueIdStr() + "param";
+      }
+
+      if (varDecl->hasLocalStorage()) {
+        slangVar.setLocalVarName(varName, funcName);
+        if (stu.varCountMap.find(slangVar.name) != stu.varCountMap.end()) {
+          stu.varCountMap[slangVar.name]++;
+          uint64_t newVarId = stu.varCountMap[slangVar.name];
+          slangVar.setLocalVarName(std::to_string(newVarId) + "D" + varName, funcName);
+        } else {
+          stu.varCountMap[slangVar.name] = 1;
+        }
+      } else if (varDecl->hasGlobalStorage()) {
+        slangVar.setGlobalVarName(varName);
+      } else if (varDecl->hasExternalStorage()) {
+        SLANG_ERROR("External Storage Not Handled.")
+      } else {
+        SLANG_ERROR("ERROR:Unknown variable storage.")
+      }
+
+      stu.addVar(slangVar.id, slangVar);
+
+      if (varDecl->getType()->isArrayType()) {
+        auto arrayType = varDecl->getType()->getAsArrayTypeUnsafe();
+        if (isa<VariableArrayType>(arrayType)) {
+          SlangExpr varExpr = convertVariable(varDecl, getLocationString(varDecl));
+          SlangExpr sizeExpr = convertVarArrayVariable(varDecl->getType(),
+                                                       arrayType->getElementType());
+
+          SlangExpr allocExpr;
+          std::stringstream ss;
+          ss << "expr.AllocE(" << sizeExpr.expr;
+          ss << ", " << getLocationString(varDecl) << ")";
+          allocExpr.expr = ss.str();
+          allocExpr.qualType = FD->getASTContext().VoidPtrTy;
+          allocExpr.locStr = getLocationString(varDecl);
+          allocExpr.compound = true;
+
+          SlangExpr tmpVoidPtr = convertToTmp(allocExpr);
+
+          SlangExpr castExpr;
+          ss.str("");
+          ss << "expr.CastE(" << tmpVoidPtr.expr;
+          ss << ", " << convertClangType(varDecl->getType());
+          ss << ", " << getLocationString(varDecl) << ")";
+          castExpr.expr = ss.str();
+          castExpr.qualType = varDecl->getType();
+          castExpr.compound = true;
+          castExpr.locStr = getLocationString(varDecl);
+
+          addAssignInstr(varExpr, castExpr, getLocationString(varDecl));
+        }
+      }
+
+      // check if it has a initialization body
+      if (varDecl->hasInit()) {
+        // yes it has, so initialize it
+        if (varDecl->getInit()->getStmtClass() == Stmt::InitListExprClass) {
+          // TODO: uncomment when initializer list is fully supported
+          // std::vector<uint32_t> indexVector;
+          // convertInitListExpr(slangVar, cast<InitListExpr>(varDecl->getInit()),
+          //    varDecl, indexVector);
+
+        } else {
+          //if (varDecl->hasLocalStorage()) { // do it for global as well
+          SlangExpr slangExpr = convertStmt(varDecl->getInit());
+          if (slangExpr.expr == "ERROR:Unknown") {
+            SLANG_ERROR("SEARCH_ME")
+          }
+          std::string locStr = getLocationString(varDecl);
+          std::stringstream ss;
+          ss << "instr.AssignI(";
+          ss << "expr.VarE(\"" << slangVar.name << "\"";
+          ss << ", " << locStr << ")"; // close expr.VarE(...
+          ss << ", " << slangExpr.expr;
+          ss << ", " << locStr << ")"; // close instr.AssignI(...
+          stu.addStmt(ss.str());
+          // }
+        }
+      }
+    } // if (stu.isNewVar(varAddr))
+  } // handleVarDecl()
+
+
   // record the variable name and type
   void handleValueDecl(const ValueDecl *valueDecl, std::string funcName) const {
-    uint64_t varAddr = (uint64_t)valueDecl;
     const VarDecl *varDecl = dyn_cast<VarDecl>(valueDecl);
 
     std::string varName;
     if (varDecl) {
-      if (stu.isNewVar(varAddr)) {
-        // seeing the variable for the first time.
-        SlangVar slangVar{};
-        slangVar.id = varAddr;
-
-        varName = valueDecl->getNameAsString();
-
-        slangVar.typeStr = convertClangType(valueDecl->getType());
-        SLANG_DEBUG("NEW_VAR: " << slangVar.convertToString())
-
-        if (varName == "") {
-          // used only to name anonymous function parameters
-          varName = Util::getNextUniqueIdStr() + "param";
-        }
-
-        if (varDecl->hasLocalStorage()) {
-          slangVar.setLocalVarName(varName, funcName);
-          if (stu.varCountMap.find(slangVar.name) != stu.varCountMap.end()) {
-            stu.varCountMap[slangVar.name]++;
-            uint64_t newVarId = stu.varCountMap[slangVar.name];
-            slangVar.setLocalVarName(std::to_string(newVarId) + "D" + varName, funcName);
-          } else {
-            stu.varCountMap[slangVar.name] = 1;
-          }
-        } else if (varDecl->hasGlobalStorage()) {
-          slangVar.setGlobalVarName(varName);
-        } else if (varDecl->hasExternalStorage()) {
-          SLANG_ERROR("External Storage Not Handled.")
-        } else {
-          SLANG_ERROR("ERROR:Unknown variable storage.")
-        }
-
-        stu.addVar(slangVar.id, slangVar);
-
-        if (valueDecl->getType()->isArrayType()) {
-          auto arrayType = valueDecl->getType()->getAsArrayTypeUnsafe();
-          if (isa<VariableArrayType>(arrayType)) {
-            SlangExpr varExpr = convertVariable(varDecl, getLocationString(valueDecl));
-            SlangExpr sizeExpr = convertVarArrayVariable(valueDecl->getType(),
-                                                         arrayType->getElementType());
-
-            SlangExpr allocExpr;
-            std::stringstream ss;
-            ss << "expr.AllocE(" << sizeExpr.expr;
-            ss << ", " << getLocationString(valueDecl) << ")";
-            allocExpr.expr = ss.str();
-            allocExpr.qualType = FD->getASTContext().VoidPtrTy;
-            allocExpr.locStr = getLocationString(valueDecl);
-            allocExpr.compound = true;
-
-            SlangExpr tmpVoidPtr = convertToTmp(allocExpr);
-
-            SlangExpr castExpr;
-            ss.str("");
-            ss << "expr.CastE(" << tmpVoidPtr.expr;
-            ss << ", " << convertClangType(valueDecl->getType());
-            ss << ", " << getLocationString(valueDecl) << ")";
-            castExpr.expr = ss.str();
-            castExpr.qualType = valueDecl->getType();
-            castExpr.compound = true;
-            castExpr.locStr = getLocationString(valueDecl);
-
-            addAssignInstr(varExpr, castExpr, getLocationString(valueDecl));
-          }
-        }
-
-        // check if it has a initialization body
-        if (varDecl->hasInit()) {
-          // yes it has, so initialize it
-          if (varDecl->getInit()->getStmtClass() == Stmt::InitListExprClass) {
-            // TODO: uncomment when initializer list is fully supported
-            // std::vector<uint32_t> indexVector;
-            // convertInitListExpr(slangVar, cast<InitListExpr>(varDecl->getInit()),
-            //    varDecl, indexVector);
-
-          } else {
-            if (varDecl->hasLocalStorage()) {
-              SlangExpr slangExpr = convertStmt(varDecl->getInit());
-              if (slangExpr.expr == "ERROR:Unknown") {
-                SLANG_ERROR("SEARCH_ME")
-              }
-              std::string locStr = getLocationString(valueDecl);
-              std::stringstream ss;
-              ss << "instr.AssignI(";
-              ss << "expr.VarE(\"" << slangVar.name << "\"";
-              ss << ", " << locStr << ")"; // close expr.VarE(...
-              ss << ", " << slangExpr.expr;
-              ss << ", " << locStr << ")"; // close instr.AssignI(...
-              stu.addStmt(ss.str());
-            }
-          }
-        }
-      }
+      handleVarDecl(varDecl, funcName);
 
     } else if(valueDecl->getAsFunction()) {
       handleFuncNameAndType(valueDecl->getAsFunction());
@@ -741,6 +812,7 @@ public:
       valueDecl->dump(); //delit
     }
   } // handleValueDecl()
+
 
   void handleDeclStmt(const DeclStmt *declStmt) const {
     stu.setLastDeclStmtTo(declStmt);
