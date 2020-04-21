@@ -507,23 +507,23 @@ public:
   }
 
   void dumpObjs(std::stringstream &ss) {
-    ss << NBSP2 << "allConstructs = {\n";
     dumpRecords(ss);
     dumpFunctions(ss);
-    ss << NBSP2 << "}, # end allConstructs dict\n";
   }
 
   void dumpRecords(std::stringstream &ss) {
+    ss << NBSP2 << "allRecords = {\n";
     for (auto slangRecord : recordMap) {
       ss << NBSP4;
       ss << "\"" << slangRecord.second.name << "\":\n";
       ss << slangRecord.second.toString();
       ss << ",\n\n";
     }
-    ss << "\n";
+    ss << NBSP2 << "}, # end allRecords dict\n\n";
   }
 
   void dumpFunctions(std::stringstream &ss) {
+    ss << NBSP2 << "allFunctions = {\n";
     std::string prefix;
     for (auto slangFunc : funcMap) {
       if (slangFunc.second.fullName == GLOBAL_DUMMY_FUNC_NAME) {
@@ -552,8 +552,8 @@ public:
 
       // member: basicBlocks
       ss << "\n";
-      ss << NBSP8 << "# Note: -1 is always start/entry BB. (REQUIRED)\n";
-      ss << NBSP8 << "# Note: 0 is always end/exit BB (REQUIRED)\n";
+      // ss << NBSP8 << "# Note: -1 is always start/entry BB. (REQUIRED)\n";
+      // ss << NBSP8 << "# Note: 0 is always end/exit BB (REQUIRED)\n";
       ss << NBSP8 << "instrSeq = [\n";
       for (auto insn : slangFunc.second.spanStmts) {
         ss << NBSP12 << insn << ",\n";
@@ -563,6 +563,7 @@ public:
       // close this function object
       ss << NBSP6 << "), # " << slangFunc.second.fullName << "() end. \n\n";
     }
+    ss << NBSP2 << "}, # end allFunctions dict\n\n";
   } // dumpFunctions()
 
   // BOUND END  : dump_routines (to SPAN Strings)
