@@ -1897,7 +1897,7 @@ public:
     } else if (isa<FunctionDecl>(valueDecl)) {
       auto funcDecl = cast<FunctionDecl>(valueDecl);
       std::string funcName = funcDecl->getNameInfo().getAsString();
-      ss << "expr.FuncE(\"" << stu.convertFuncName(funcName) << "\"";
+      ss << "expr.VarE(\"" << stu.convertFuncName(funcName) << "\"";
       ss << ", " << locStr << ")";
       slangExpr.expr = ss.str();
       slangExpr.qualType = funcDecl->getType();
