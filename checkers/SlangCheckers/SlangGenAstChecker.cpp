@@ -1195,8 +1195,8 @@ public:
     // store parent to a temporary
     parentTmpExpr = parentExpr;
     if (parentExpr.compound) {
-      if (parentExpr.qualType.getTypePtr()->isPointerType()
-          || !(parentExpr.expr.substr(0,12) == "expr.MemberE")) {
+      if (parentExpr.qualType.getTypePtr()->isPointerType()) {
+          //|| !(parentExpr.expr.substr(0,12) == "expr.MemberE")) {
         parentTmpExpr = convertToTmp(parentExpr);
       } else {
         SlangExpr addrOfExpr;
@@ -2354,10 +2354,10 @@ public:
     } else if (type->isRecordType()) {
       SlangRecord *getBackSlangRecord;
       if (type->isStructureType()) {
-        return convertClangRecordType(qt.getTypePtr()->getAsStructureType()->getDecl(),
+        return convertClangRecordType(type->getAsStructureType()->getDecl(),
             getBackSlangRecord);
       } else if (type->isUnionType()) {
-        return convertClangRecordType(qt.getTypePtr()->getAsUnionType()->getDecl(),
+        return convertClangRecordType(type->getAsUnionType()->getDecl(),
             getBackSlangRecord);
       } else {
         ss << "ERROR:RecordType";
