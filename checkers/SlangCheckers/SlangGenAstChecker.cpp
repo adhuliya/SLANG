@@ -146,11 +146,13 @@ public:
   const Stmt *lastDeclStmt;
 
   SpanStmtVector spanStmts;
+  bool hasBody;
 
   SlangFunc() {
     variadic = false;
     paramNames = std::vector<std::string>{};
     tmpVarCount = 0;
+    hasBody = true;
   }
 }; // class SlangFunc
 
@@ -555,8 +557,12 @@ public:
       // ss << NBSP8 << "# Note: -1 is always start/entry BB. (REQUIRED)\n";
       // ss << NBSP8 << "# Note: 0 is always end/exit BB (REQUIRED)\n";
       ss << NBSP8 << "instrSeq = [\n";
-      for (auto insn : slangFunc.second.spanStmts) {
-        ss << NBSP12 << insn << ",\n";
+      if (slangFunc.second.hasBody && slangFunc.second.spanStmts.size() == 0) {
+        ss << NBSP12 << "instr.NopI(),\n";
+      } else {
+        for (auto insn : slangFunc.second.spanStmts) {
+          ss << NBSP12 << insn << ",\n";
+        }
       }
       ss << NBSP8 << "], # instrSeq end.\n";
 
@@ -648,6 +654,7 @@ public:
     if (body) {
       convertStmt(body);
     } else {
+      stu.currFunc->hasBody = false;
       SLANG_ERROR("No body for function: " << funcDecl->getNameAsString())
     }
   }
