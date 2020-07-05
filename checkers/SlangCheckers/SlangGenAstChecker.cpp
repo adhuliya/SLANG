@@ -152,7 +152,7 @@ public:
     variadic = false;
     paramNames = std::vector<std::string>{};
     tmpVarCount = 0;
-    hasBody = true;
+    hasBody = false;
   }
 }; // class SlangFunc
 
@@ -651,9 +651,12 @@ public:
 
   void handleFunctionBody(const FunctionDecl *funcDecl) const {
     const Stmt *body = funcDecl->getBody();
-    if (body) {
+    if (funcDecl->hasBody()) {
+      stu.currFunc->hasBody = true;
       convertStmt(body);
+      SLANG_DEBUG("FunctionHasBody: " << funcDecl->getNameAsString())
     } else {
+      // FIXME: control doesn't reach here :(
       stu.currFunc->hasBody = false;
       SLANG_ERROR("No body for function: " << funcDecl->getNameAsString())
     }
