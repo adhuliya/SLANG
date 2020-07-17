@@ -1264,23 +1264,26 @@ def CFGViewer : Checker<"ViewCFG">,
 
 //BOUND START : AD
 
+// To invoke use the Checker<"checkerName"> string in:
+//   clang --analyze -Xanalyzer -analyzer-checker=debug.<checkerName> filename
+
 def SlangGenAstChecker : Checker<"SlangGenAst">,
   HelpText<"SlangGen: Checker to convert Clang AST to SPAN IR and dump it.">,
   Documentation<NotDocumented>;
 
-def SlangBugReporterChecker : Checker<"slangbug">,
+def SlangBugReporterChecker : Checker<"SlangBug">,
   HelpText<"SlangBug: Checker to report bugs given in file.">,
   Documentation<NotDocumented>;
 
-def MyScratchpadChecker : Checker<"myscratch">,
+def MyScratchpadChecker : Checker<"SlangMyScratch">,
   HelpText<"MyScratchpad: Checker for testing">,
   Documentation<NotDocumented>;
 
-def MyOwnChecker : Checker<"myownchecker">,
+def MyOwnChecker : Checker<"SlangMyOwnChecker">,
   HelpText<"My own checker just for hacks.">,
   Documentation<NotDocumented>;
 
-def MyTraverseAST : Checker<"myt">,
+def MyTraverseAST : Checker<"SlangMTA">,
   HelpText<"Print the traversal of the AST (block wise).">,
   Documentation<NotDocumented>;
 
