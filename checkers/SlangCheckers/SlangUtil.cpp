@@ -16,7 +16,8 @@
 #include <sstream>
 
 // TRACE < DEBUG < INFO < EVENT < ERROR < FATAL
-uint8_t slang::Util::LogLevel = SLANG_INFO_LEVEL;
+// uint8_t slang::Util::LogLevel = SLANG_INFO_LEVEL;
+uint8_t slang::Util::LogLevel = SLANG_ERROR_LEVEL;
 uint32_t slang::Util::id = 0;
 
 std::string slang::Util::getDateTimeString() {

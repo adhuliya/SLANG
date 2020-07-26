@@ -24,6 +24,8 @@ def CoreBuiltin : Package<"builtin">, ParentPackage<Core>, Hidden;
 def CoreUninitialized  : Package<"uninitialized">, ParentPackage<Core>;
 def CoreAlpha : Package<"core">, ParentPackage<Alpha>;
 
+def Span: Package<"span">, ParentPackage<Core>; // AD
+
 // The OptIn package is for checkers that are not alpha and that would normally
 // be on by default but where the driver does not have enough information to
 // determine when they are applicable. For example, localizability checkers fit
@@ -107,6 +109,39 @@ def Debug : Package<"debug">, Hidden;
 def CloneDetectionAlpha : Package<"clone">, ParentPackage<Alpha>;
 
 def NonDeterminismAlpha : Package<"nondeterminism">, ParentPackage<Alpha>;
+
+//===----------------------------------------------------------------------===//
+// Span Checkers.
+//===----------------------------------------------------------------------===//
+
+// To invoke use the Checker<"checkerName"> string in:
+//   clang --analyze -Xanalyzer -analyzer-checker=core.span.<checkerName> filename
+// or: clang-tidy --list-checks | less; # see all the checks available
+//   clang-tidy test.cc -checks=-\*,clang-analyzer-core.span.SlangGenAst --
+
+let ParentPackage = Span in {
+
+def SlangGenAstChecker : Checker<"SlangGenAst">,
+  HelpText<"SlangGen: Checker to convert Clang AST to SPAN IR and dump it.">,
+  Documentation<NotDocumented>;
+
+def SlangBugReporterChecker : Checker<"SlangBug">,
+  HelpText<"SlangBug: Checker to report bugs given in file.">,
+  Documentation<NotDocumented>;
+
+def MyScratchpadChecker : Checker<"SlangMyScratch">,
+  HelpText<"MyScratchpad: Checker for testing">,
+  Documentation<NotDocumented>;
+
+def MyOwnChecker : Checker<"SlangMyOwnChecker">,
+  HelpText<"My own checker just for hacks.">,
+  Documentation<NotDocumented>;
+
+def MyTraverseAST : Checker<"SlangMTA">,
+  HelpText<"Print the traversal of the AST (block wise).">,
+  Documentation<NotDocumented>;
+
+} // end "span"
 
 //===----------------------------------------------------------------------===//
 // Core Checkers.
@@ -1261,33 +1296,6 @@ def LiveStatementsDumper : Checker<"DumpLiveStmts">,
 def CFGViewer : Checker<"ViewCFG">,
   HelpText<"View Control-Flow Graphs using GraphViz">,
   Documentation<NotDocumented>;
-
-//BOUND START : AD
-
-// To invoke use the Checker<"checkerName"> string in:
-//   clang --analyze -Xanalyzer -analyzer-checker=debug.<checkerName> filename
-
-def SlangGenAstChecker : Checker<"SlangGenAst">,
-  HelpText<"SlangGen: Checker to convert Clang AST to SPAN IR and dump it.">,
-  Documentation<NotDocumented>;
-
-def SlangBugReporterChecker : Checker<"SlangBug">,
-  HelpText<"SlangBug: Checker to report bugs given in file.">,
-  Documentation<NotDocumented>;
-
-def MyScratchpadChecker : Checker<"SlangMyScratch">,
-  HelpText<"MyScratchpad: Checker for testing">,
-  Documentation<NotDocumented>;
-
-def MyOwnChecker : Checker<"SlangMyOwnChecker">,
-  HelpText<"My own checker just for hacks.">,
-  Documentation<NotDocumented>;
-
-def MyTraverseAST : Checker<"SlangMTA">,
-  HelpText<"Print the traversal of the AST (block wise).">,
-  Documentation<NotDocumented>;
-
-//BOUND END   : AD
 
 def CFGDumper : Checker<"DumpCFG">,
   HelpText<"Display Control-Flow Graphs">,
