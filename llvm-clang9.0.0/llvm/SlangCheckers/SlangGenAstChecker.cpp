@@ -1565,7 +1565,7 @@ public:
     conditionExpr = convertToIfTmp(conditionExpr);
 
     addCondInstr(conditionExpr.expr,
-        ifTrueLabel, ifFalseLabel, getLocationString(condition));
+        ifTrueLabel, ifFalseLabel, getLocationString(ifStmt));
 
     addLabelInstr(ifTrueLabel);
 
