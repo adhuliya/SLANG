@@ -258,7 +258,7 @@ public:
     }
     ss << NBSP8 << "],\n";
 
-    ss << NBSP8 << "loc = " << locStr << ",\n";
+    ss << NBSP8 << "info = " << locStr << ",\n";
     ss << NBSP6 << ")"; // close types.*(...
 
     return ss.str();
