@@ -278,6 +278,71 @@ public:
   }
 }; // class SlangRecord
 
+// holds info about the switch-cases
+class SwitchCtrlFlowLabels {
+public:
+    int counter;
+    std::string switchStrId; // id for the switch
+    std::string thisCaseCondLabel; // label for the current case
+    std::string thisBodyLabel; // label for the current body
+    std::string nextCaseCondLabel; // label for the next case (when encountered)
+    std::string nextBodyLabel; // label for the next body (case or default)
+    std::string switchStartLabel; // switch start label
+    std::string switchExitLabel; // switch exit label
+    std::string defaultCaseLabel;
+    std::string gotoLabel; // a label
+    std::string gotoLabelLocStr; // a label
+    SlangExpr switchCond;
+    std::stringstream ss;
+    bool defaultExists;
+
+    SwitchCtrlFlowLabels (std::string id) {
+      switchStrId = id;
+      counter = 0;
+      defaultExists = false;
+      switchStartLabel = switchStrId + "SwitchStart";
+      switchExitLabel = switchStrId + "SwitchExit";
+      defaultCaseLabel = switchStrId + "Default";
+      thisCaseCondLabel = "";  // initially no condition
+      thisBodyLabel = "";  // initially no body
+      auto count = getNextCounterStr();
+      nextCaseCondLabel = genLabel("CaseCond", count);
+      nextBodyLabel = genLabel("CaseBody", count);
+      gotoLabel = "";
+      gotoLabelLocStr = "";
+    }
+
+    void setupForThisCase() {
+      thisCaseCondLabel = nextCaseCondLabel;
+      thisBodyLabel = nextBodyLabel;
+      auto count = getNextCounterStr();
+      nextCaseCondLabel = genLabel("CaseCond", count);
+      nextBodyLabel = genLabel("CaseBody", count);
+    }
+
+    void setupForDefaultCase() {
+      defaultExists = true;
+      thisCaseCondLabel = defaultCaseLabel;
+      thisBodyLabel = nextBodyLabel;
+      auto count = getNextCounterStr();
+      // nextCaseCondLabel = genLabel("CaseCond", count); // deliberatly commented
+      nextBodyLabel = genLabel("CaseBody", count);
+    }
+
+    std::string getNextCounterStr() {
+      std::stringstream ss;
+      counter += 1;
+      ss << counter;
+      return ss.str();
+    }
+
+    std::string genLabel(std::string s, std::string count) {
+      std::stringstream ss;
+      ss << switchStrId << s << count;
+      return ss.str();
+    }
+}; // class SwitchCtrlFlowLabels
+
 // holds details of the entire translation unit
 class SlangTranslationUnit {
 public:
@@ -310,6 +375,9 @@ public:
     // vector of start and exit label of constructs which can contain break and continue stmts.
     std::vector<std::pair<std::string, std::string>> entryExitLabels;
 
+    // to handle the conversion of switch statements
+    SwitchCtrlFlowLabels *switchCfls;
+
     void pushLabels(std::string entry, std::string exit) {
       auto labelPair = std::make_pair(entry, exit);
       entryExitLabels.push_back(labelPair);
@@ -335,7 +403,8 @@ public:
         : uniqueId{0}, fileName{},
           globalInits{}, globalInitsConverted{false},
           currFunc{nullptr}, recordId{0},
-          varMap{}, varCountMap{}, funcMap{}, dirtyVars{}
+          varMap{}, varCountMap{}, funcMap{}, dirtyVars{},
+          switchCfls{nullptr}
     {}
 
   // clear the buffer for the next function.
@@ -849,9 +918,15 @@ public:
 
     if (!stmt) { return slangExpr; }
 
-    SLANG_DEBUG("ConvertingStmt : " << stmt->getStmtClassName() << "\n")
+    SLANG_ERROR("ConvertingStmt : " << stmt->getStmtClassName() << "\n")
 
     switch (stmt->getStmtClass()) {
+    case Stmt::CaseStmtClass:
+      return convertCaseStmt(cast<CaseStmt>(stmt));
+
+    case Stmt::DefaultStmtClass:
+      return convertDefaultCaseStmt(cast<DefaultStmt>(stmt));
+
     case Stmt::BreakStmtClass:
       return convertBreakStmt(cast<BreakStmt>(stmt));
 
@@ -917,7 +992,7 @@ public:
       return convertReturnStmt(cast<ReturnStmt>(stmt));
 
     case Stmt::SwitchStmtClass:
-      return convertSwitchStmt(cast<SwitchStmt>(stmt));
+      return convertSwitchStmtNew(cast<SwitchStmt>(stmt));
 
     case Stmt::GotoStmtClass:
       return convertGotoStmt(cast<GotoStmt>(stmt));
@@ -937,9 +1012,9 @@ public:
     case Stmt::CallExprClass:
       return convertCallExpr(cast<CallExpr>(stmt));
 
-    case Stmt::CaseStmtClass:
-      // we manually handle case stmt when we handle switch stmt
-      break;
+    // case Stmt::CaseStmtClass:
+    //   // we manually handle case stmt when we handle switch stmt
+    //   break;
 
     case Stmt::NullStmtClass: // just a ";"
       stu.addStmt("instr.NopI(" + getLocationString(stmt) + ")");
@@ -1265,6 +1340,94 @@ public:
     return SlangExpr{};
   }
 
+SlangExpr convertSwitchStmtNew(const SwitchStmt *switchStmt) const {
+    auto oldSwitchCfls = stu.switchCfls;
+    auto switchCfls = SwitchCtrlFlowLabels(stu.genNextLabelCountStr());
+    stu.switchCfls = &switchCfls;
+
+    stu.pushLabels(stu.switchCfls->switchStartLabel, stu.switchCfls->switchExitLabel);
+
+    addLabelInstr(stu.switchCfls->switchStartLabel);
+
+    const Expr *condExpr = switchStmt->getCond();
+    SlangExpr switchCond = convertToTmp(convertStmt(condExpr));
+    stu.switchCfls->switchCond = switchCond;
+
+    // Get all case statements inside switch.
+    if (switchStmt->getBody()) {
+        convertStmt(switchStmt->getBody());
+    } else {
+        for (auto it = switchStmt->child_begin(); it != switchStmt->child_end(); ++it) {
+            convertStmt(*it);
+        }
+    }
+
+    addGotoInstr(stu.switchCfls->nextBodyLabel);
+    addLabelInstr(stu.switchCfls->nextCaseCondLabel); // the last condition label
+    if (stu.switchCfls->defaultExists) {
+        addGotoInstr(stu.switchCfls->defaultCaseLabel);
+    }
+    addLabelInstr(stu.switchCfls->nextBodyLabel);
+    addLabelInstr(stu.switchCfls->switchExitLabel);
+    stu.switchCfls = oldSwitchCfls;  // restore the old ptr
+
+    stu.popLabel();
+    return SlangExpr{};
+} // convertSwitchStmtNew()
+
+
+SlangExpr convertCaseStmt(const CaseStmt *caseStmt) const {
+    if (stu.switchCfls->thisCaseCondLabel != "") {
+      addGotoInstr(stu.switchCfls->nextBodyLabel); // add a fall through for prev body
+    }
+
+    stu.switchCfls->setupForThisCase();
+
+  const Stmt *cond = *(caseStmt->child_begin());
+  SlangExpr caseCond = convertToTmp(convertStmt(cond));
+
+  addLabelInstr(stu.switchCfls->thisCaseCondLabel); // condition label
+  // add the actual condition
+  SlangExpr eqExpr = convertToIfTmp(createBinaryExpr(
+      stu.switchCfls->switchCond, "op.BO_EQ", caseCond,
+      getLocationString(caseStmt), FD->getASTContext().UnsignedIntTy));
+  addCondInstr(eqExpr.expr, stu.switchCfls->thisBodyLabel,
+      stu.switchCfls->nextCaseCondLabel, getLocationString(caseStmt));
+
+  // case body
+  if (stu.switchCfls->gotoLabel != "") {
+    std::stringstream ss;
+    ss << "instr.LabelI(\"" << stu.switchCfls->gotoLabel << "\"";
+    ss << ", " << stu.switchCfls->gotoLabelLocStr << ")"; // close instr.LabelI(...
+    stu.addStmt(ss.str());
+    stu.switchCfls->gotoLabel = stu.switchCfls->gotoLabelLocStr = "";
+  }
+  addLabelInstr(stu.switchCfls->thisBodyLabel);
+  for (auto it = caseStmt->child_begin(); it != caseStmt->child_end(); ++it) {
+    convertStmt(*it);
+  }
+
+  return SlangExpr{};
+}
+
+    SlangExpr convertDefaultCaseStmt(const DefaultStmt *defaultStmt) const {
+      if (stu.switchCfls->thisCaseCondLabel != "") {
+        addGotoInstr(stu.switchCfls->nextBodyLabel); // add a fall through for prev body
+      }
+
+      stu.switchCfls->setupForDefaultCase();
+
+      addLabelInstr(stu.switchCfls->defaultCaseLabel); // default case label
+
+      // default body
+      addLabelInstr(stu.switchCfls->thisBodyLabel); // body label
+      for (auto it = defaultStmt->child_begin(); it != defaultStmt->child_end(); ++it) {
+        convertStmt(*it);
+      }
+
+      return SlangExpr{};
+    }
+
   SlangExpr convertSwitchStmt(const SwitchStmt *switchStmt) const {
     std::string id = stu.genNextLabelCountStr();
     std::string switchStartLabel = id + "SwitchStart";
@@ -1308,7 +1471,7 @@ public:
 
       if (isa<CaseStmt>(stmt)) {
         const CaseStmt *caseStmt = cast<CaseStmt>(stmt);
-        // find where to jump to if the case condtion is false
+        // find where to jump to if the case condition is false
         std::string falseLabel;
         falseLabel = defaultLabel;
 
@@ -2320,9 +2483,17 @@ public:
 
     std::string locStr = getLocationString(labelStmt);
 
-    ss << "instr.LabelI(\"" << labelStmt->getName() << "\"";
-    ss << ", " << locStr << ")"; // close instr.LabelI(...
-    stu.addStmt(ss.str());
+    SLANG_ERROR("LABEL_BEFORE_CASE 1: " << labelStmt->getName() << "\n");
+    auto firstChild = *labelStmt->child_begin();
+    if (isa<CaseStmt>(firstChild) && stu.switchCfls) {
+      stu.switchCfls->gotoLabel = labelStmt->getName();
+      stu.switchCfls->gotoLabelLocStr = locStr;
+      llvm::errs() << "LABEL_BEFORE_CASE: " << stu.switchCfls->gotoLabel << "\n";
+    } else {
+      ss << "instr.LabelI(\"" << labelStmt->getName() << "\"";
+      ss << ", " << locStr << ")"; // close instr.LabelI(...
+      stu.addStmt(ss.str());
+    }
 
     for (auto it = labelStmt->child_begin(); it != labelStmt->child_end(); ++it) {
       convertStmt(*it);
