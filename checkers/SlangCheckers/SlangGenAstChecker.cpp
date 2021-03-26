@@ -127,6 +127,11 @@ public:
     name += funcName + ":" + varName;
   }
 
+  void setLocalVarNameStatic(std::string varName, std::string funcName) {
+    name = GLOBAL_VAR_NAME_PREFIX;
+    name += funcName + ":" + varName;
+  }
+
   void setGlobalVarName(std::string varName) {
     name = GLOBAL_VAR_NAME_PREFIX;
     name += varName;
@@ -278,6 +283,71 @@ public:
   }
 }; // class SlangRecord
 
+// holds info about the switch-cases
+class SwitchCtrlFlowLabels {
+public:
+    int counter;
+    std::string switchStrId; // id for the switch
+    std::string thisCaseCondLabel; // label for the current case
+    std::string thisBodyLabel; // label for the current body
+    std::string nextCaseCondLabel; // label for the next case (when encountered)
+    std::string nextBodyLabel; // label for the next body (case or default)
+    std::string switchStartLabel; // switch start label
+    std::string switchExitLabel; // switch exit label
+    std::string defaultCaseLabel;
+    std::string gotoLabel; // a label
+    std::string gotoLabelLocStr; // a label
+    SlangExpr switchCond;
+    std::stringstream ss;
+    bool defaultExists;
+
+    SwitchCtrlFlowLabels (std::string id) {
+      switchStrId = id;
+      counter = 0;
+      defaultExists = false;
+      switchStartLabel = switchStrId + "SwitchStart";
+      switchExitLabel = switchStrId + "SwitchExit";
+      defaultCaseLabel = switchStrId + "Default";
+      thisCaseCondLabel = "";  // initially no condition
+      thisBodyLabel = "";  // initially no body
+      auto count = getNextCounterStr();
+      nextCaseCondLabel = genLabel("CaseCond", count);
+      nextBodyLabel = genLabel("CaseBody", count);
+      gotoLabel = "";
+      gotoLabelLocStr = "";
+    }
+
+    void setupForThisCase() {
+      thisCaseCondLabel = nextCaseCondLabel;
+      thisBodyLabel = nextBodyLabel;
+      auto count = getNextCounterStr();
+      nextCaseCondLabel = genLabel("CaseCond", count);
+      nextBodyLabel = genLabel("CaseBody", count);
+    }
+
+    void setupForDefaultCase() {
+      defaultExists = true;
+      thisCaseCondLabel = defaultCaseLabel;
+      thisBodyLabel = nextBodyLabel;
+      auto count = getNextCounterStr();
+      // nextCaseCondLabel = genLabel("CaseCond", count); // deliberatly commented
+      nextBodyLabel = genLabel("CaseBody", count);
+    }
+
+    std::string getNextCounterStr() {
+      std::stringstream ss;
+      counter += 1;
+      ss << counter;
+      return ss.str();
+    }
+
+    std::string genLabel(std::string s, std::string count) {
+      std::stringstream ss;
+      ss << switchStrId << s << count;
+      return ss.str();
+    }
+}; // class SwitchCtrlFlowLabels
+
 // holds details of the entire translation unit
 class SlangTranslationUnit {
 public:
@@ -310,6 +380,9 @@ public:
     // vector of start and exit label of constructs which can contain break and continue stmts.
     std::vector<std::pair<std::string, std::string>> entryExitLabels;
 
+    // to handle the conversion of switch statements
+    SwitchCtrlFlowLabels *switchCfls;
+
     void pushLabels(std::string entry, std::string exit) {
       auto labelPair = std::make_pair(entry, exit);
       entryExitLabels.push_back(labelPair);
@@ -335,7 +408,8 @@ public:
         : uniqueId{0}, fileName{},
           globalInits{}, globalInitsConverted{false},
           currFunc{nullptr}, recordId{0},
-          varMap{}, varCountMap{}, funcMap{}, dirtyVars{}
+          varMap{}, varCountMap{}, funcMap{}, dirtyVars{},
+          switchCfls{nullptr}
     {}
 
   // clear the buffer for the next function.
@@ -609,8 +683,13 @@ public:
       FD = FD->getCanonicalDecl();
       FD = handleFuncNameAndType(FD, true);
       stu.currFunc = &stu.funcMap[(uint64_t) FD];
-      SLANG_DEBUG("Current Function: " << stu.currFunc->name << " " << (uint64_t)FD->getCanonicalDecl())
-      handleFunctionBody(FD);
+      SLANG_DEBUG("CurrentFunction: " << stu.currFunc->name << " " << (uint64_t)FD->getCanonicalDecl())
+      if (FD->isVariadic()) {
+        SLANG_ERROR("ERROR:VariadicFunction(SkippingBody): "\
+          << stu.currFunc->name << " " << (uint64_t)FD->getCanonicalDecl())
+      } else {
+        handleFunctionBody(FD); // only for non-variadic functions.
+      }
     } else {
       SLANG_ERROR("Decl is not a Function")
     }
@@ -726,7 +805,9 @@ public:
         varName = Util::getNextUniqueIdStr() + "param";
       }
 
-      if (varDecl->hasLocalStorage()) {
+      if (varDecl->isStaticLocal()) {
+        slangVar.setLocalVarNameStatic(varName, funcName);
+      } else if (varDecl->hasLocalStorage()) {
         slangVar.setLocalVarName(varName, funcName);
         if (stu.varCountMap.find(slangVar.name) != stu.varCountMap.end()) {
           stu.varCountMap[slangVar.name]++;
@@ -773,7 +854,7 @@ public:
           castExpr.compound = true;
           castExpr.locStr = getLocationString(varDecl);
 
-          addAssignInstr(varExpr, castExpr, getLocationString(varDecl));
+          addAssignInstr(varExpr, castExpr, getLocationString(varDecl), false);
         }
       }
 
@@ -781,10 +862,11 @@ public:
       if (varDecl->hasInit()) {
         // yes it has, so initialize it
         if (varDecl->getInit()->getStmtClass() == Stmt::InitListExprClass) {
-          // TODO: uncomment when initializer list is fully supported
-          // std::vector<uint32_t> indexVector;
-          // convertInitListExpr(slangVar, cast<InitListExpr>(varDecl->getInit()),
-          //    varDecl, indexVector);
+          SLANG_ERROR("ERROR:AggregateInit: Check if the output is correct.")
+          varDecl->dump();
+          std::vector<uint32_t> indexVector;
+          convertInitListExpr(slangVar, cast<InitListExpr>(varDecl->getInit()),
+             varDecl, indexVector, varDecl->isStaticLocal());
 
         } else {
           //if (varDecl->hasLocalStorage()) { // do it for global as well
@@ -799,7 +881,12 @@ public:
           ss << ", " << locStr << ")"; // close expr.VarE(...
           ss << ", " << slangExpr.expr;
           ss << ", " << locStr << ")"; // close instr.AssignI(...
-          stu.addStmt(ss.str());
+          if (varDecl->isStaticLocal()) { // them make a global init
+            auto func = &stu.funcMap[0];
+            func->spanStmts.push_back(ss.str());
+          } else {
+            stu.addStmt(ss.str());
+          }
           // }
         }
       }
@@ -849,9 +936,15 @@ public:
 
     if (!stmt) { return slangExpr; }
 
-    SLANG_DEBUG("ConvertingStmt : " << stmt->getStmtClassName() << "\n")
+    SLANG_INFO("ConvertingStmt : " << stmt->getStmtClassName() << "\n")
 
     switch (stmt->getStmtClass()) {
+    case Stmt::CaseStmtClass:
+      return convertCaseStmt(cast<CaseStmt>(stmt));
+
+    case Stmt::DefaultStmtClass:
+      return convertDefaultCaseStmt(cast<DefaultStmt>(stmt));
+
     case Stmt::BreakStmtClass:
       return convertBreakStmt(cast<BreakStmt>(stmt));
 
@@ -917,7 +1010,7 @@ public:
       return convertReturnStmt(cast<ReturnStmt>(stmt));
 
     case Stmt::SwitchStmtClass:
-      return convertSwitchStmt(cast<SwitchStmt>(stmt));
+      return convertSwitchStmtNew(cast<SwitchStmt>(stmt));
 
     case Stmt::GotoStmtClass:
       return convertGotoStmt(cast<GotoStmt>(stmt));
@@ -937,9 +1030,9 @@ public:
     case Stmt::CallExprClass:
       return convertCallExpr(cast<CallExpr>(stmt));
 
-    case Stmt::CaseStmtClass:
-      // we manually handle case stmt when we handle switch stmt
-      break;
+    // case Stmt::CaseStmtClass:
+    //   // we manually handle case stmt when we handle switch stmt
+    //   break;
 
     case Stmt::NullStmtClass: // just a ";"
       stu.addStmt("instr.NopI(" + getLocationString(stmt) + ")");
@@ -1002,14 +1095,14 @@ public:
   } // convertVarArrayVariable()
 
   SlangExpr convertInitListExpr(SlangVar& slangVar, const InitListExpr *initListExpr,
-      const VarDecl *varDecl, std::vector<uint32_t>& indexVector) const {
+      const VarDecl *varDecl, std::vector<uint32_t>& indexVector, bool staticLocal) const {
     uint32_t index = 0;
     for (auto it = initListExpr->begin(); it != initListExpr->end(); ++it) {
       const Stmt *stmt = *it;
       if (stmt->getStmtClass() == Stmt::InitListExprClass) {
           // && isCompoundTypeAt(varDecl, indexVector)) {
         indexVector.push_back(index);
-        convertInitListExpr(slangVar, cast<InitListExpr>(stmt), varDecl, indexVector);
+        convertInitListExpr(slangVar, cast<InitListExpr>(stmt), varDecl, indexVector, staticLocal);
         indexVector.pop_back();
       } else {
         SlangExpr rhs = convertToTmp(convertStmt(stmt));
@@ -1018,7 +1111,7 @@ public:
         SlangExpr lhs = genInitLhsExpr(slangVar, varDecl, indexVector);
         indexVector.pop_back();
 
-        addAssignInstr(lhs, rhs, getLocationString(stmt));
+        addAssignInstr(lhs, rhs, getLocationString(stmt), staticLocal);
       }
       index += 1;
     }
@@ -1044,7 +1137,8 @@ public:
     std::string prefix = "";
     if (varDecl->getType()->isArrayType()) {
       for (auto it = indexVector.end()-1; it != indexVector.begin()-1; --it) {
-        ss << prefix << "expr.ArrayE(" << *it;
+        ss << prefix << "expr.ArrayE(" << "expr.LitE(" << *it <<
+          ", " << getLocationString(varDecl) << ")";
         if (prefix == "") {
           prefix = ", ";
         }
@@ -1265,6 +1359,94 @@ public:
     return SlangExpr{};
   }
 
+SlangExpr convertSwitchStmtNew(const SwitchStmt *switchStmt) const {
+    auto oldSwitchCfls = stu.switchCfls;
+    auto switchCfls = SwitchCtrlFlowLabels(stu.genNextLabelCountStr());
+    stu.switchCfls = &switchCfls;
+
+    stu.pushLabels(stu.switchCfls->switchStartLabel, stu.switchCfls->switchExitLabel);
+
+    addLabelInstr(stu.switchCfls->switchStartLabel);
+
+    const Expr *condExpr = switchStmt->getCond();
+    SlangExpr switchCond = convertToTmp(convertStmt(condExpr));
+    stu.switchCfls->switchCond = switchCond;
+
+    // Get all case statements inside switch.
+    if (switchStmt->getBody()) {
+        convertStmt(switchStmt->getBody());
+    } else {
+        for (auto it = switchStmt->child_begin(); it != switchStmt->child_end(); ++it) {
+            convertStmt(*it);
+        }
+    }
+
+    addGotoInstr(stu.switchCfls->nextBodyLabel);
+    addLabelInstr(stu.switchCfls->nextCaseCondLabel); // the last condition label
+    if (stu.switchCfls->defaultExists) {
+        addGotoInstr(stu.switchCfls->defaultCaseLabel);
+    }
+    addLabelInstr(stu.switchCfls->nextBodyLabel);
+    addLabelInstr(stu.switchCfls->switchExitLabel);
+    stu.switchCfls = oldSwitchCfls;  // restore the old ptr
+
+    stu.popLabel();
+    return SlangExpr{};
+} // convertSwitchStmtNew()
+
+
+SlangExpr convertCaseStmt(const CaseStmt *caseStmt) const {
+    if (stu.switchCfls->thisCaseCondLabel != "") {
+      addGotoInstr(stu.switchCfls->nextBodyLabel); // add a fall through for prev body
+    }
+
+    stu.switchCfls->setupForThisCase();
+
+  const Stmt *cond = *(caseStmt->child_begin());
+  SlangExpr caseCond = convertToTmp(convertStmt(cond));
+
+  addLabelInstr(stu.switchCfls->thisCaseCondLabel); // condition label
+  // add the actual condition
+  SlangExpr eqExpr = convertToIfTmp(createBinaryExpr(
+      stu.switchCfls->switchCond, "op.BO_EQ", caseCond,
+      getLocationString(caseStmt), FD->getASTContext().UnsignedIntTy));
+  addCondInstr(eqExpr.expr, stu.switchCfls->thisBodyLabel,
+      stu.switchCfls->nextCaseCondLabel, getLocationString(caseStmt));
+
+  // case body
+  if (stu.switchCfls->gotoLabel != "") {
+    std::stringstream ss;
+    ss << "instr.LabelI(\"" << stu.switchCfls->gotoLabel << "\"";
+    ss << ", " << stu.switchCfls->gotoLabelLocStr << ")"; // close instr.LabelI(...
+    stu.addStmt(ss.str());
+    stu.switchCfls->gotoLabel = stu.switchCfls->gotoLabelLocStr = "";
+  }
+  addLabelInstr(stu.switchCfls->thisBodyLabel);
+  for (auto it = caseStmt->child_begin(); it != caseStmt->child_end(); ++it) {
+    convertStmt(*it);
+  }
+
+  return SlangExpr{};
+}
+
+    SlangExpr convertDefaultCaseStmt(const DefaultStmt *defaultStmt) const {
+      if (stu.switchCfls->thisCaseCondLabel != "") {
+        addGotoInstr(stu.switchCfls->nextBodyLabel); // add a fall through for prev body
+      }
+
+      stu.switchCfls->setupForDefaultCase();
+
+      addLabelInstr(stu.switchCfls->defaultCaseLabel); // default case label
+
+      // default body
+      addLabelInstr(stu.switchCfls->thisBodyLabel); // body label
+      for (auto it = defaultStmt->child_begin(); it != defaultStmt->child_end(); ++it) {
+        convertStmt(*it);
+      }
+
+      return SlangExpr{};
+    }
+
   SlangExpr convertSwitchStmt(const SwitchStmt *switchStmt) const {
     std::string id = stu.genNextLabelCountStr();
     std::string switchStartLabel = id + "SwitchStart";
@@ -1308,7 +1490,7 @@ public:
 
       if (isa<CaseStmt>(stmt)) {
         const CaseStmt *caseStmt = cast<CaseStmt>(stmt);
-        // find where to jump to if the case condtion is false
+        // find where to jump to if the case condition is false
         std::string falseLabel;
         falseLabel = defaultLabel;
 
@@ -1793,7 +1975,9 @@ public:
     std::stringstream ss;
     bool toInt = false;
 
+    fl->dump();  //delit dump floating point numbers
     std::string locStr = getLocationString(fl);
+    SLANG_TRACE(locStr);  //delit
 
     // check if float is implicitly casted to int
     const auto &parents = FD->getASTContext().getParents(*fl);
@@ -1819,9 +2003,10 @@ public:
 
     ss << "expr.LitE(";
     if (toInt) {
-      ss << (int64_t)fl->getValue().convertToDouble();
+      // ss << (int64_t)fl->getValue().convertToDouble();
+      ss << (int64_t)fl->getValueAsApproximateDouble();
     } else {
-      ss << std::fixed << fl->getValue().convertToDouble();
+      ss << std::fixed << fl->getValueAsApproximateDouble();
     }
     ss << ", " << locStr << ")";
     SLANG_TRACE(ss.str())
@@ -1958,7 +2143,7 @@ public:
 
     // assign tmp = 1
     SlangExpr tmpVar = genTmpVariable("L", "types.Int32", getLocationString(binOp));
-    addAssignInstr(tmpVar, trueValue, getLocationString(binOp));
+    addAssignInstr(tmpVar, trueValue, getLocationString(binOp), false);
 
     // check first part a ||, a &&
     SlangExpr leftOprExpr = convertToIfTmp(convertStmt(leftOprStmt));
@@ -1975,7 +2160,7 @@ public:
 
     // assign tmp = 0
     addLabelInstr(tmpReAssign);
-    addAssignInstr(tmpVar, falseValue, getLocationString(binOp));
+    addAssignInstr(tmpVar, falseValue, getLocationString(binOp), false);
 
     // exit label
     addLabelInstr(exitLabel);
@@ -2006,14 +2191,14 @@ public:
     switch(unOp->getOpcode()) {
       case UO_PreInc:
       case UO_PreDec: {
-        addAssignInstr(exprArg, incDecExpr, getLocationString(unOp));
+        addAssignInstr(exprArg, incDecExpr, getLocationString(unOp), false);
         return convertToTmp(exprArg, true);
       }
 
       case UO_PostInc:
       case UO_PostDec: {
         SlangExpr tmpExpr = convertToTmp(exprArg, true);
-        addAssignInstr(exprArg, incDecExpr, getLocationString(unOp));
+        addAssignInstr(exprArg, incDecExpr, getLocationString(unOp), false);
         return tmpExpr;
       }
 
@@ -2274,7 +2459,7 @@ public:
           lhsExpr.qualType);
     }
 
-    addAssignInstr(lhsExpr, newRhsExpr, getLocationString(binOp));
+    addAssignInstr(lhsExpr, newRhsExpr, getLocationString(binOp), false);
 
     return lhsExpr;
   } // convertCompoundAssignmentOp()
@@ -2293,7 +2478,7 @@ public:
       rhsExpr = convertToTmp(rhsExpr);
     }
 
-    addAssignInstr(lhsExpr, rhsExpr, getLocationString(binOp));
+    addAssignInstr(lhsExpr, rhsExpr, getLocationString(binOp), false);
 
     return lhsExpr;
   } // convertAssignmentOp()
@@ -2320,9 +2505,16 @@ public:
 
     std::string locStr = getLocationString(labelStmt);
 
-    ss << "instr.LabelI(\"" << labelStmt->getName() << "\"";
-    ss << ", " << locStr << ")"; // close instr.LabelI(...
-    stu.addStmt(ss.str());
+    auto firstChild = *labelStmt->child_begin();
+    if (isa<CaseStmt>(firstChild) && stu.switchCfls) {
+      stu.switchCfls->gotoLabel = labelStmt->getName();
+      stu.switchCfls->gotoLabelLocStr = locStr;
+      llvm::errs() << "ERROR:LABEL_BEFORE_CASE(CheckTheCFG): " << stu.switchCfls->gotoLabel << "\n";
+    } else {
+      ss << "instr.LabelI(\"" << labelStmt->getName() << "\"";
+      ss << ", " << locStr << ")"; // close instr.LabelI(...
+      stu.addStmt(ss.str());
+    }
 
     for (auto it = labelStmt->child_begin(); it != labelStmt->child_end(); ++it) {
       convertStmt(*it);
@@ -2418,10 +2610,7 @@ public:
       }
 
     } else if (type->isFloatingType()) {
-      ss << "types.Float32";
-    } else if (type->isRealFloatingType()) {
-      ss << "types.Float64"; // FIXME: is realfloat a double?
-
+      ss << "types.Float64";  // FIXME: all are considered 64 bit (okay for analysis purposes)
     } else if (type->isVoidType()) {
       ss << "types.Void";
     } else {
@@ -2770,14 +2959,19 @@ public:
     stu.addStmt(ss.str());
   }
 
-  void addAssignInstr(SlangExpr& lhs, SlangExpr rhs, std::string locStr) const {
+  void addAssignInstr(SlangExpr& lhs, SlangExpr rhs, std::string locStr, bool staticLocal) const {
     std::stringstream ss;
     if (lhs.compound && rhs.compound) {
-      rhs = convertToTmp(rhs);
+      rhs = convertToTmp(rhs); // staticLocal init will not generate tmp
     }
     ss << "instr.AssignI(" << lhs.expr;
     ss << ", " << rhs.expr << ", " << locStr << ")";
-    stu.addStmt(ss.str());
+    if (staticLocal) { // do a global init
+      auto func = &stu.funcMap[0];
+      func->spanStmts.push_back(ss.str());
+    } else {
+      stu.addStmt(ss.str());
+    }
   }
 
   // Note: unlike createBinaryExpr, createUnaryExpr doesn't convert its expr to tmp expr.
