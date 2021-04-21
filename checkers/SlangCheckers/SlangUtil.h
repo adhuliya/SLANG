@@ -27,7 +27,7 @@
 
 #define SLANG_TRACE(XX)                                                            \
     if (slang::Util::LogLevel <= SLANG_TRACE_LEVEL) {                              \
-        llvm::errs() << "\n  " << slang::Util::getDateTimeString() << ": TRACE ("  \
+        llvm::errs() << "\n  " << slang::Util::getDateTimeString() << ": TRACE: ("  \
                      << SLANG_TRACE_LEVEL << "):" << __FILE__ << ":" << __func__   \
                      << "():" << __LINE__ << ":\n"                                 \
                      << XX << "\n";                                                \
@@ -35,7 +35,7 @@
 
 #define SLANG_DEBUG(XX)                                                            \
     if (slang::Util::LogLevel <= SLANG_DEBUG_LEVEL) {                              \
-        llvm::errs() << "\n  " << slang::Util::getDateTimeString() << ": DEBUG ("  \
+        llvm::errs() << "\n  " << slang::Util::getDateTimeString() << ": DEBUG: ("  \
                      << SLANG_DEBUG_LEVEL << "):" << __FILE__ << ":" << __func__   \
                      << "():" << __LINE__ << ":\n"                                 \
                      << XX << "\n";                                                \
@@ -43,7 +43,7 @@
 
 #define SLANG_INFO(XX)                                                             \
     if (slang::Util::LogLevel <= SLANG_INFO_LEVEL) {                               \
-        llvm::errs() << "\n  " << slang::Util::getDateTimeString() << ": INFO  ("  \
+        llvm::errs() << "\n  " << slang::Util::getDateTimeString() << ": INFO:  ("  \
                      << SLANG_INFO_LEVEL << "):" << __FILE__ << ":" << __func__    \
                      << "():" << __LINE__ << ":\n"                                 \
                      << XX << "\n";                                                \
@@ -51,7 +51,7 @@
 
 #define SLANG_EVENT(XX)                                                            \
     if (slang::Util::LogLevel <= SLANG_EVENT_LEVEL) {                              \
-        llvm::errs() << "\n  " << slang::Util::getDateTimeString() << ": EVENT ("  \
+        llvm::errs() << "\n  " << slang::Util::getDateTimeString() << ": EVENT: ("  \
                      << SLANG_EVENT_LEVEL << "):" << __FILE__ << ":" << __func__   \
                      << "():" << __LINE__ << ":\n"                                 \
                      << XX << "\n";                                                \
@@ -59,7 +59,7 @@
 
 #define SLANG_ERROR(XX)                                                            \
     if (slang::Util::LogLevel <= SLANG_ERROR_LEVEL) {                              \
-        llvm::errs() << "\n  " << slang::Util::getDateTimeString() << ": ERROR ("  \
+        llvm::errs() << "\n  " << slang::Util::getDateTimeString() << ": ERROR: ("  \
                      << SLANG_ERROR_LEVEL << "):" << __FILE__ << ":" << __func__   \
                      << "():" << __LINE__ << ":\n"                                 \
                      << XX << "\n";                                                \

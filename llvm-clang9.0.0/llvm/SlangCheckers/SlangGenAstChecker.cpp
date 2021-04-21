@@ -1097,6 +1097,9 @@ public:
   SlangExpr convertInitListExpr(SlangVar& slangVar, const InitListExpr *initListExpr,
       const VarDecl *varDecl, std::vector<uint32_t>& indexVector, bool staticLocal) const {
     uint32_t index = 0;
+    SLANG_DEBUG("INIT_LIST_EXPR dump:");
+    initListExpr->dump();
+    initListExpr->getType().dump();
     for (auto it = initListExpr->begin(); it != initListExpr->end(); ++it) {
       const Stmt *stmt = *it;
       if (stmt->getStmtClass() == Stmt::InitListExprClass) {
