@@ -56,7 +56,7 @@ void ento::registerMyScratchpadChecker(CheckerManager &mgr) {
     mgr.registerChecker<MyScratchpadChecker>();
 }
 
-// bool ento::shouldRegisterMyScratchpadChecker(const LangOptions &LO) {
-//   return true;
-// }
+bool ento::shouldRegisterMyScratchpadChecker(const LangOptions &LO) {
+  return true;
+}
 

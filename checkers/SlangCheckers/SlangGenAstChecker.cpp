@@ -219,6 +219,22 @@ public:
     return members;
   }
 
+  std::string getMemberName(int index) const {
+    return members[index].name;
+  }
+
+  void genMemberAccessExpr(std::string& of, std::string& loc,
+                                  int index, SlangExpr& slangExpr) {
+    std::stringstream ss;
+
+    ss << "expr.MemberE(\"" << getMemberName(index) << "\"";
+    ss << ", " << of;
+    ss << ", " << loc << ")"; // end expr.MemberE(
+
+    slangExpr.expr = ss.str();
+    slangExpr.qualType = members[index].type;
+  }
+
   std::string genMemberExpr(std::vector<uint32_t> indexVector) {
     std::stringstream ss;
 
@@ -383,6 +399,9 @@ public:
     // to handle the conversion of switch statements
     SwitchCtrlFlowLabels *switchCfls;
 
+    // is static local var decl?
+    bool isStaticLocal;
+
     void pushLabels(std::string entry, std::string exit) {
       auto labelPair = std::make_pair(entry, exit);
       entryExitLabels.push_back(labelPair);
@@ -409,7 +428,7 @@ public:
           globalInits{}, globalInitsConverted{false},
           currFunc{nullptr}, recordId{0},
           varMap{}, varCountMap{}, funcMap{}, dirtyVars{},
-          switchCfls{nullptr}
+          switchCfls{nullptr}, isStaticLocal{false}
     {}
 
   // clear the buffer for the next function.
@@ -431,7 +450,12 @@ public:
   }
 
   void addStmt(std::string spanStmt) {
-    currFunc->spanStmts.push_back(spanStmt);
+    if (isStaticLocal) {
+      auto func = &funcMap[0];
+      func->spanStmts.push_back(spanStmt);
+    } else {
+      currFunc->spanStmts.push_back(spanStmt);
+    }
   }
 
   void pushBackFuncParams(std::string paramName) {
@@ -531,7 +555,7 @@ public:
       SLANG_INFO("FILE_HAS_NO_FUNCTION: Hence no output spanir file.")
     }
 
-    llvm::errs() << ss.str();
+    // llvm::errs() << ss.str();
   } // dumpSlangIr()
 
   void dumpHeader(std::stringstream &ss) {
@@ -790,6 +814,8 @@ public:
     uint64_t varAddr = (uint64_t)varDecl;
     std::string varName;
 
+    stu.isStaticLocal = varDecl->isStaticLocal();
+
     if (stu.isNewVar(varAddr)) {
       // seeing the variable for the first time.
       SlangVar slangVar{};
@@ -854,7 +880,7 @@ public:
           castExpr.compound = true;
           castExpr.locStr = getLocationString(varDecl);
 
-          addAssignInstr(varExpr, castExpr, getLocationString(varDecl), false);
+          addAssignInstr(varExpr, castExpr, getLocationString(varDecl));
         }
       }
 
@@ -864,10 +890,12 @@ public:
         if (varDecl->getInit()->getStmtClass() == Stmt::InitListExprClass) {
           SLANG_ERROR("ERROR:AggregateInit: Check if the output is correct.")
           varDecl->dump();
-          std::vector<uint32_t> indexVector;
-          convertInitListExpr(slangVar, cast<InitListExpr>(varDecl->getInit()),
-             varDecl, indexVector, varDecl->isStaticLocal());
+          // std::vector<uint32_t> indexVector;
+          // convertInitListExpr(slangVar, cast<InitListExpr>(varDecl->getInit()),
+          //    varDecl, indexVector, varDecl->isStaticLocal());
 
+          SlangExpr slangExpr = convertSlangVar(slangVar, varDecl);
+          convertInitListExprNew(slangExpr, cast<InitListExpr>(varDecl->getInit()));
         } else {
           //if (varDecl->hasLocalStorage()) { // do it for global as well
           SlangExpr slangExpr = convertStmt(varDecl->getInit());
@@ -891,6 +919,7 @@ public:
         }
       }
     } // if (stu.isNewVar(varAddr))
+    stu.isStaticLocal = false;
   } // handleVarDecl()
 
 
@@ -1094,6 +1123,36 @@ public:
     }
   } // convertVarArrayVariable()
 
+  SlangExpr convertInitListExprNew(
+      SlangExpr& lhs, // SlangVar& slangVar,
+      const InitListExpr *initListExpr
+  ) const {
+    uint32_t index = 0;
+    SLANG_DEBUG("INIT_LIST_EXPR_NEW dump:");
+    initListExpr->dump();
+    initListExpr->getType().dump();
+
+    for (const auto *it = initListExpr->begin(); it != initListExpr->end(); ++it) {
+      const Stmt *stmt = *it;
+      // compute the lhs of the assignment
+      SlangExpr currLhs = genInitLhsExprNew(lhs, initListExpr->getType(), index);
+
+      if (stmt->getStmtClass() == Stmt::InitListExprClass) {
+        // handle sub-init-list here
+        auto subInitExpr = cast<InitListExpr>(stmt);
+        SlangExpr subLhs = convertToTmp2(currLhs); //, subInitExpr->getType());
+        convertInitListExprNew(subLhs, subInitExpr);
+      } else {
+        // compute the rhs part
+        SlangExpr rhs = convertToTmp(convertStmt(stmt));
+        addAssignInstr(currLhs, rhs, getLocationString(stmt));
+      }
+      index += 1;
+    }
+
+    return SlangExpr{};
+  } // convertInitListExprNew()
+
   SlangExpr convertInitListExpr(SlangVar& slangVar, const InitListExpr *initListExpr,
       const VarDecl *varDecl, std::vector<uint32_t>& indexVector, bool staticLocal) const {
     uint32_t index = 0;
@@ -1114,7 +1173,7 @@ public:
         SlangExpr lhs = genInitLhsExpr(slangVar, varDecl, indexVector);
         indexVector.pop_back();
 
-        addAssignInstr(lhs, rhs, getLocationString(stmt), staticLocal);
+        addAssignInstr(lhs, rhs, getLocationString(stmt));
       }
       index += 1;
     }
@@ -1128,6 +1187,45 @@ public:
     // TODO
     return true;
   }
+
+  SlangExpr genInitLhsExprNew(
+      SlangExpr& lhs, // SlangVar& slangVar,
+      QualType initExprListQt,
+      int index
+  ) const {
+    SlangExpr slangExpr;
+    std::stringstream ss;
+
+    const auto *type = initExprListQt.getTypePtr();
+
+    std::string prefix = "";
+    if (type->isArrayType()) {
+      ss << prefix << "expr.ArrayE(";
+      ss << "expr.LitE(" << index << ", " << lhs.locStr << ")";
+      ss << ", " << lhs.expr; // must be a variable expr only
+      ss << ", " << lhs.locStr << ")"; // end expr.ArrayE(
+
+      slangExpr.expr = ss.str();
+      slangExpr.qualType = type->getAsArrayTypeUnsafe()->getElementType();
+    } else {
+      // must be a record type
+      const RecordDecl *recordDecl;
+
+      if (type->isStructureType()) {
+        recordDecl = type->getAsStructureType()->getDecl();
+      } else { // must be a union then
+        recordDecl = type->getAsUnionType()->getDecl();
+      }
+
+      auto slangRecord = stu.getRecord((uint64_t)recordDecl);
+      slangRecord.genMemberAccessExpr(lhs.expr, lhs.locStr, index, slangExpr);
+    }
+
+    slangExpr.compound = true;
+    slangExpr.locStr = lhs.locStr;
+    return slangExpr;
+  } // genInitLhsExprNew()
+
 
   // used to generate lhs (lvalue) for initializer lists like
   // int arr[][2] = {{1, 2}, {3, 4}, {5, 6}}; // for each element
@@ -1978,7 +2076,7 @@ SlangExpr convertCaseStmt(const CaseStmt *caseStmt) const {
     std::stringstream ss;
     bool toInt = false;
 
-    fl->dump();  //delit dump floating point numbers
+    // fl->dump();  //delit dump floating point numbers
     std::string locStr = getLocationString(fl);
     SLANG_TRACE(locStr);  //delit
 
@@ -2052,6 +2150,25 @@ SlangExpr convertCaseStmt(const CaseStmt *caseStmt) const {
 
     return slangExpr;
   } // convertVariable()
+
+
+  SlangExpr convertSlangVar(
+      SlangVar& slangVar,
+      const VarDecl *varDecl
+  ) const {
+    std::stringstream ss;
+    SlangExpr slangExpr;
+
+    ss << "expr.VarE(\"" << slangVar.name << "\"";
+    ss << ", " << getLocationString(varDecl) << ")";
+
+    slangExpr.expr = ss.str();
+    slangExpr.qualType = varDecl->getType();
+    slangExpr.varId = (uint64_t)varDecl;
+    slangExpr.locStr = getLocationString(varDecl);
+
+    return slangExpr;
+  } // convertSlangVar()
 
   SlangExpr convertEnumConst(const EnumConstantDecl *ecd, std::string &locStr) const {
     SlangExpr slangExpr;
@@ -2146,7 +2263,7 @@ SlangExpr convertCaseStmt(const CaseStmt *caseStmt) const {
 
     // assign tmp = 1
     SlangExpr tmpVar = genTmpVariable("L", "types.Int32", getLocationString(binOp));
-    addAssignInstr(tmpVar, trueValue, getLocationString(binOp), false);
+    addAssignInstr(tmpVar, trueValue, getLocationString(binOp));
 
     // check first part a ||, a &&
     SlangExpr leftOprExpr = convertToIfTmp(convertStmt(leftOprStmt));
@@ -2163,7 +2280,7 @@ SlangExpr convertCaseStmt(const CaseStmt *caseStmt) const {
 
     // assign tmp = 0
     addLabelInstr(tmpReAssign);
-    addAssignInstr(tmpVar, falseValue, getLocationString(binOp), false);
+    addAssignInstr(tmpVar, falseValue, getLocationString(binOp));
 
     // exit label
     addLabelInstr(exitLabel);
@@ -2194,14 +2311,14 @@ SlangExpr convertCaseStmt(const CaseStmt *caseStmt) const {
     switch(unOp->getOpcode()) {
       case UO_PreInc:
       case UO_PreDec: {
-        addAssignInstr(exprArg, incDecExpr, getLocationString(unOp), false);
+        addAssignInstr(exprArg, incDecExpr, getLocationString(unOp));
         return convertToTmp(exprArg, true);
       }
 
       case UO_PostInc:
       case UO_PostDec: {
         SlangExpr tmpExpr = convertToTmp(exprArg, true);
-        addAssignInstr(exprArg, incDecExpr, getLocationString(unOp), false);
+        addAssignInstr(exprArg, incDecExpr, getLocationString(unOp));
         return tmpExpr;
       }
 
@@ -2400,6 +2517,55 @@ SlangExpr convertCaseStmt(const CaseStmt *caseStmt) const {
     }
   } // convertToTmp()
 
+  // stores the given expression into a tmp variable
+  SlangExpr convertToTmp2(SlangExpr slangExpr, bool force = false) const {
+
+    if (slangExpr.compound || force == true) {
+      bool takeAddress = false;
+      SlangExpr tmpExpr;
+      if (slangExpr.qualType.isNull() || slangExpr.qualType.getTypePtr()->isVoidType()) {
+        tmpExpr = genTmpVariable("t", "types.Int32", slangExpr.locStr);
+      } else {
+        if (slangExpr.qualType.getTypePtr()->isArrayType()) {
+          // for array type, generate a tmp variable which is a pointer
+          // to its element types.
+          const Type *type = slangExpr.qualType.getTypePtr();
+          const ArrayType *arrayType = type->getAsArrayTypeUnsafe();
+          QualType elementType = arrayType->getElementType();
+          QualType tmpVarType = FD->getASTContext().getPointerType(elementType);
+          tmpExpr = genTmpVariable("t", tmpVarType, slangExpr.locStr);
+        } else if (slangExpr.qualType.getTypePtr()->isFunctionType()) {
+          // create a tmp variable which is a pointer to the function type
+          QualType tmpVarType =
+              FD->getASTContext().getPointerType(slangExpr.qualType);
+          tmpExpr = genTmpVariable("t", tmpVarType, slangExpr.locStr);
+        } else if (slangExpr.qualType.getTypePtr()->isRecordType()) {
+          takeAddress = true;
+          tmpExpr = genTmpVariable("t",
+                                   FD->getASTContext().getPointerType(slangExpr.qualType),
+                                   slangExpr.locStr);
+        } else {
+          tmpExpr = genTmpVariable("t", slangExpr.qualType, slangExpr.locStr);
+        }
+      }
+      std::stringstream ss;
+
+      if (takeAddress) {
+        ss << "instr.AssignI(" << tmpExpr.expr << ", ";
+        ss << "expr.AddrOfE(" << slangExpr.expr << ", " << slangExpr.locStr << ")";
+        ss << ", " << slangExpr.locStr << ")"; // close instr.AssignI(...
+      } else {
+        ss << "instr.AssignI(" << tmpExpr.expr << ", " << slangExpr.expr;
+        ss << ", " << slangExpr.locStr << ")"; // close instr.AssignI(...
+      }
+      stu.addStmt(ss.str());
+
+      return tmpExpr;
+    } else {
+      return slangExpr;
+    }
+  } // convertToTmp2()
+
   // special tmp variable for if "t.1if", "t.2if" etc...
   SlangExpr convertToIfTmp(SlangExpr slangExpr, bool force = false) const {
     if (slangExpr.compound || force == true) {
@@ -2462,8 +2628,7 @@ SlangExpr convertCaseStmt(const CaseStmt *caseStmt) const {
           lhsExpr.qualType);
     }
 
-    addAssignInstr(lhsExpr, newRhsExpr, getLocationString(binOp), false);
-
+    addAssignInstr(lhsExpr, newRhsExpr, getLocationString(binOp));
     return lhsExpr;
   } // convertCompoundAssignmentOp()
 
@@ -2481,7 +2646,7 @@ SlangExpr convertCaseStmt(const CaseStmt *caseStmt) const {
       rhsExpr = convertToTmp(rhsExpr);
     }
 
-    addAssignInstr(lhsExpr, rhsExpr, getLocationString(binOp), false);
+    addAssignInstr(lhsExpr, rhsExpr, getLocationString(binOp));
 
     return lhsExpr;
   } // convertAssignmentOp()
@@ -2962,19 +3127,14 @@ SlangExpr convertCaseStmt(const CaseStmt *caseStmt) const {
     stu.addStmt(ss.str());
   }
 
-  void addAssignInstr(SlangExpr& lhs, SlangExpr rhs, std::string locStr, bool staticLocal) const {
+  void addAssignInstr(SlangExpr& lhs, SlangExpr rhs, std::string locStr) const {
     std::stringstream ss;
     if (lhs.compound && rhs.compound) {
       rhs = convertToTmp(rhs); // staticLocal init will not generate tmp
     }
     ss << "instr.AssignI(" << lhs.expr;
     ss << ", " << rhs.expr << ", " << locStr << ")";
-    if (staticLocal) { // do a global init
-      auto func = &stu.funcMap[0];
-      func->spanStmts.push_back(ss.str());
-    } else {
-      stu.addStmt(ss.str());
-    }
+    stu.addStmt(ss.str());
   }
 
   // Note: unlike createBinaryExpr, createUnaryExpr doesn't convert its expr to tmp expr.

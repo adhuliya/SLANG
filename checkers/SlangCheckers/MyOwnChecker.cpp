@@ -110,6 +110,6 @@ int MyOwnChecker::obj_count = 0;
 
 void ento::registerMyOwnChecker(CheckerManager &mgr) { mgr.registerChecker<MyOwnChecker>(); }
 
-// bool ento::shouldRegisterMyOwnChecker(const LangOptions &LO) {
-//   return true;
-// }
+bool ento::shouldRegisterMyOwnChecker(const LangOptions &LO) {
+  return true;
+}

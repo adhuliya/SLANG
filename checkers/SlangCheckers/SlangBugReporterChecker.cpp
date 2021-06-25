@@ -172,7 +172,7 @@ class BugRepo {
             }
             inputTextFile.close();
         } else {
-            llvm::errs() << "SLANG: ERROR: Cannot load from file '" << fileName << "'\n";
+            llvm::errs() << "SLANG: ERROR: Cannot load from file '" << bugFileName << "'\n";
         }
 
         llvm::errs() << "SLANG: Total bugs loaded: " << bugVector.size() << "\n";
@@ -407,7 +407,7 @@ void ento::registerSlangBugReporterChecker(CheckerManager &mgr) {
     mgr.registerChecker<SlangBugReporterChecker>();
 }
 
-// bool ento::shouldRegisterSlangBugReporterChecker(const LangOptions &LO) {
-//   return true;
-// }
+bool ento::shouldRegisterSlangBugReporterChecker(const LangOptions &LO) {
+  return true;
+}
 

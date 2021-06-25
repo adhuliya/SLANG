@@ -202,7 +202,7 @@ void MyTraverseAST::handleLocation(const Stmt *stmt) const {
 // Register the Checker
 void ento::registerMyTraverseAST(CheckerManager &mgr) { mgr.registerChecker<MyTraverseAST>(); }
 
-// bool ento::shouldRegisterMyTraverseAST(const LangOptions &LO) {
-//   return true;
-// }
+bool ento::shouldRegisterMyTraverseAST(const LangOptions &LO) {
+  return true;
+}
 
